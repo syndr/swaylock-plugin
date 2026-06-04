@@ -1801,6 +1801,19 @@ static void setup_clientless_mode(struct swaylock_state *state) {
 		return;
 	}
 
+	// Cancel any pending per-output redraw timers before tearing down the
+	// nested server. Otherwise, with multiple outputs (e.g. --command-each),
+	// a second output's redraw timer may fire after this teardown and call
+	// client_timeout() -> wl_client_destroy() on a client whose event loop has
+	// already been freed below, causing a use-after-free crash.
+	struct swaylock_surface *timer_surface = NULL;
+	wl_list_for_each(timer_surface, &state->surfaces, link) {
+		if (timer_surface->client_submission_timer) {
+			loop_remove_timer(state->eventloop, timer_surface->client_submission_timer);
+			timer_surface->client_submission_timer = NULL;
+		}
+	}
+
 	// First, shutdown nested server, and all resources and clients.
 	// todo: any additional clean up necessary?
 	loop_remove_fd(state->eventloop, wl_event_loop_get_fd(state->server.loop));
@@ -1836,7 +1849,12 @@ static void client_timeout(struct swaylock_bg_client *bg_client) {
 	// listener (which handles auto-restart, among other things)
 	wl_list_remove(&bg_client->client_destroy_listener.link);
 	wl_list_init(&bg_client->client_destroy_listener.link);
-	wl_client_destroy(bg_client->client);
+	// Only destroy the client while the nested server still exists. Once
+	// setup_clientless_mode() has torn it down, the client's event sources are
+	// already freed and wl_client_destroy() would crash (use-after-free).
+	if (state->server.display) {
+		wl_client_destroy(bg_client->client);
+	}
 	cleanup_client(bg_client);
 
 	setup_clientless_mode(state);
