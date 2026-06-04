@@ -117,6 +117,36 @@ Run these commands:
     ninja -C build
     sudo ninja -C build install
 
+### On immutable / rpm-ostree systems (Silverblue, Kinoite, Bazzite)
+
+Where `/usr` is read-only, layering the build toolchain onto the base image is
+undesirable. [`contrib/build-env.sh`](contrib/build-env.sh) instead creates a
+Fedora distrobox containing the build dependencies:
+
+    contrib/build-env.sh
+
+Then build with the normal Meson workflow, but install to a writable prefix such
+as `~/.local` (usually already on `PATH`). The PAM service file must land in the
+real `/etc/pam.d` regardless of prefix, so install it separately:
+
+    distrobox enter swaylock-build -- meson setup build --prefix="$HOME/.local"
+    distrobox enter swaylock-build -- ninja -C build
+    distrobox enter swaylock-build -- ninja -C build install
+    sudo install -Dm644 pam/swaylock-plugin /etc/pam.d/swaylock-plugin
+
+`swaylock-plugin` is built in a container matching the host's Fedora release but
+*run* on the host, so that PAM authenticates against your real login.
+
+#### Xwayland-based plugins
+
+Running X11 wallpaper programs (e.g. xscreensaver hacks via `windowtolayer` and
+[`example_xwayland_wrapper.py`](example_xwayland_wrapper.py)) starts an
+`Xwayland` server per output. Xwayland compiles its keymap with `xkbcomp`, which
+writes to `/var/lib/xkb`. That directory is missing on images that ship Xwayland
+without `xorg-x11-server-common`; create it once:
+
+    sudo install -d -m 1777 /var/lib/xkb
+
 ##### Without PAM
 
 On systems without PAM, `swaylock-plugin` uses `shadow.h`.
