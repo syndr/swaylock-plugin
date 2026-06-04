@@ -1924,10 +1924,25 @@ static bool spawn_command(struct swaylock_state *state, int sock_child,
 		swaylock_log(LOG_ERROR, "Failed to update file actions");
 		goto end;
 	}
+	/* Reset SIGCHLD to its default disposition in the spawned process. swaylock
+	 * sets SIGCHLD to SIG_IGN to auto-reap its own children, but that
+	 * disposition is inherited across the entire spawned process tree. A plugin
+	 * that forks and waits for a helper -- e.g. Xwayland, which runs xkbcomp via
+	 * waitpid() -- then sees waitpid() fail with ECHILD and misbehaves (Xwayland
+	 * reports "XKB: Couldn't compile keymap" and fails to start its keyboard).
+	 * POSIX_SPAWN_SETSIGDEF restores the default so descendants can reap. */
+	sigset_t default_sigchld;
+	sigemptyset(&default_sigchld);
+	sigaddset(&default_sigchld, SIGCHLD);
+	if (posix_spawnattr_setsigdefault(&attribs, &default_sigchld) != 0) {
+		swaylock_log(LOG_ERROR, "Failed to set spawn default signals");
+		goto end;
+	}
 	/* Make child processes their own session leader. This ensures that
 	 * they do not have a controlling terminal, and thus should not expect
 	 * to interact on swaylock's terminal */
-	if (posix_spawnattr_setflags(&attribs, posix_spawn_setsid_flag()) != 0) {
+	if (posix_spawnattr_setflags(&attribs,
+			posix_spawn_setsid_flag() | POSIX_SPAWN_SETSIGDEF) != 0) {
 		swaylock_log(LOG_ERROR, "Failed to set spawn flags");
 		goto end;
 	}
