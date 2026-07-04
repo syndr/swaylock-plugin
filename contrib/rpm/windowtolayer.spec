@@ -40,5 +40,5 @@ install -Dpm0755 target/rpm/%{name} %{buildroot}%{_bindir}/%{name}
 %{_bindir}/%{name}
 
 %changelog
-* Thu Jul 02 2026 Syndr <syndr@styx.ultroncore.net> - 0.3.1-1
+* Thu Jul 02 2026 syndr <syndr@ultroncore.net> - 0.3.1-1
 - Initial COPR package
