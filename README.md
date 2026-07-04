@@ -1,7 +1,9 @@
 # swaylock-plugin
 
-[![swaylock-plugin COPR build](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/swaylock-plugin/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/swaylock-plugin/)
-[![windowtolayer COPR build](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/windowtolayer/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/windowtolayer/)
+| COPR package | Latest build |
+| --- | --- |
+| [`swaylock-plugin`](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/swaylock-plugin/) | [![build status](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/swaylock-plugin/status_image/last_build.png?r=20260704)](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/swaylock-plugin/) |
+| [`windowtolayer`](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/windowtolayer/) | [![build status](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/windowtolayer/status_image/last_build.png?r=20260704)](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/package/windowtolayer/) |
 
 This is a fork of [`swaylock`](https://github.com/swaywm/swaylock), a screen
 locking utility for Wayland compositors. With `swaylock-plugin`, you can for
