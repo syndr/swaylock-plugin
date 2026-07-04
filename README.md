@@ -98,6 +98,36 @@ off after 10 minutes of inactivity.
 
 ## Installation
 
+### From COPR (Fedora)
+
+Prebuilt, signed RPMs for Fedora live in the
+[`syndr/swaylock-plugin`](https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/)
+COPR — the easiest path on Fedora:
+
+    sudo dnf copr enable syndr/swaylock-plugin
+    sudo dnf install swaylock-plugin
+
+The RPM ships the binaries, PAM configuration, man page, shell completions, and
+the Xwayland wrapper at
+`/usr/libexec/swaylock-plugin/example_xwayland_wrapper.py`. To run X11 wallpaper
+programs (xscreensaver hacks), also install `windowtolayer` (same COPR) along
+with Xwayland and `xkbcomp`:
+
+    sudo dnf install windowtolayer xorg-x11-server-Xwayland xkbcomp
+    sudo install -d -m 1777 /var/lib/xkb   # only if /var/lib/xkb is absent
+
+On `rpm-ostree` systems (Silverblue, Kinoite, Bazzite), add the repo file and
+layer the packages instead:
+
+    sudo curl -fsSL -o /etc/yum.repos.d/_copr_syndr-swaylock-plugin.repo \
+        "https://copr.fedorainfracloud.org/coprs/syndr/swaylock-plugin/repo/fedora-$(rpm -E %fedora)/syndr-swaylock-plugin-fedora-$(rpm -E %fedora).repo"
+    rpm-ostree install swaylock-plugin windowtolayer
+
+See [`contrib/rpm/README.md`](contrib/rpm/README.md) for packaging details and
+the release process.
+
+### Build from source
+
 Install dependencies:
 
 * meson \*
@@ -121,6 +151,10 @@ Run these commands:
     sudo ninja -C build install
 
 ### On immutable / rpm-ostree systems (Silverblue, Kinoite, Bazzite)
+
+If you only want to install swaylock-plugin, prefer the [COPR
+packages](#from-copr-fedora) above — layering a signed RPM is simpler than
+building. This section is for building from source on an immutable host.
 
 Where `/usr` is read-only, layering the build toolchain onto the base image is
 undesirable. [`contrib/build-env.sh`](contrib/build-env.sh) instead creates a
