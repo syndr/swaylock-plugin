@@ -8,6 +8,14 @@ name: CI
 
 on:
   pull_request:
+    # Docs-only PRs don't affect the build, so skip the Fedora container build
+    # for them. Note: if this job is ever made a *required* status check in
+    # branch protection, a skipped run reports as pending and blocks merges —
+    # switch to always-running with a gated build step at that point.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 jobs:
