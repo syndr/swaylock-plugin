@@ -131,17 +131,22 @@ the release process.
 ### From GitHub Releases (Debian/Ubuntu)
 
 Prebuilt `.deb` packages for Debian stable and recent Ubuntu are attached to
-each [GitHub Release](https://github.com/syndr/swaylock-plugin/releases).
-Download the file matching your distro (the suffix names it, e.g.
-`swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb`) and install it with apt:
+each [GitHub Release](https://github.com/syndr/swaylock-plugin/releases),
+for both `swaylock-plugin` and `windowtolayer` (the screensaver lockscreen
+setup needs both). Download the files matching your distro (the suffix names
+it, e.g. `swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb`) and install them
+with apt:
 
-    sudo apt install ./swaylock-plugin_*.deb
+    sudo apt install ./swaylock-plugin_*.deb ./windowtolayer_*.deb
 
-The package ships the same file set as the RPM: binaries, PAM configuration,
-man page, shell completions, and the Xwayland wrapper. `windowtolayer` is not
-packaged for Debian/Ubuntu yet — build it from source if you want X11
-wallpaper programs. See
-[`contrib/debian/README.md`](contrib/debian/README.md) for packaging details.
+The `swaylock-plugin` package ships the same file set as the RPM: binaries,
+PAM configuration, man page, shell completions, and the Xwayland wrapper.
+Like its COPR counterpart, the `windowtolayer` package tracks the latest
+upstream stable tag at build time. To run X11 wallpaper programs, also
+install Xwayland and `xkbcomp` from your distro. See
+[`contrib/debian/README.md`](contrib/debian/README.md) and
+[`contrib/debian-windowtolayer/README.md`](contrib/debian-windowtolayer/README.md)
+for packaging details.
 
 ### Build from source
 

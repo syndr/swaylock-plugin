@@ -36,5 +36,6 @@ The `.deb` lands in the parent directory.
   entry automatically (via `dch`) whenever `meson.build`'s version is newer,
   so a version bump in `meson.build` is enough for a release — same
   single-source-of-truth rule as the RPM flow.
-* `windowtolayer` (needed for X11 wallpaper programs) is not packaged for
-  Debian/Ubuntu yet; build it from source.
+* `windowtolayer` (needed for X11 wallpaper programs) is packaged separately
+  from [`contrib/debian-windowtolayer/`](../debian-windowtolayer/) and
+  attached to the same GitHub Releases.

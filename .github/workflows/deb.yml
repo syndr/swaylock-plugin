@@ -1,12 +1,14 @@
 name: Debian packages
 
 # GitHub Releases are the distribution endpoint for Debian/Ubuntu users — no
-# PPA/OBS. This workflow builds swaylock-plugin .debs inside Debian/Ubuntu
-# containers from contrib/debian/. On pull requests the packages are uploaded
-# as CI artifacts and gated on `lintian --fail-on error`; when called from
-# release.yml with a release tag, the .debs are also attached to that tag's
-# GitHub Release (created on the fly if it does not exist) with a
-# distro-suffixed file name, e.g. swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb.
+# PPA/OBS. This workflow builds swaylock-plugin .debs (from contrib/debian/)
+# and windowtolayer .debs (from contrib/debian-windowtolayer/, tracking the
+# latest upstream tag like the COPR package) inside Debian/Ubuntu containers.
+# On pull requests the packages are uploaded as CI artifacts and gated on
+# `lintian --fail-on error`; when called from release.yml with a release tag,
+# the .debs are also attached to that tag's GitHub Release (created on the
+# fly if it does not exist) with a distro-suffixed file name, e.g.
+# swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb.
 #
 # There is deliberately no `on: push: tags:` trigger: release.yml pushes the
 # tag with GITHUB_TOKEN, which does not re-trigger GitHub Actions — hence the
@@ -107,10 +109,95 @@ jobs:
           path: debs/*.deb
           if-no-files-found: error
 
+  build-windowtolayer:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['debian:stable', 'ubuntu:24.04', 'ubuntu:latest']
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        # See the build job: container jobs may fall back to `sh`.
+        shell: bash
+    steps:
+      - name: Install packaging tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+            build-essential debhelper devscripts equivs lintian git ca-certificates curl
+
+      - name: Install rust toolchain (distro packages, upstream MSRV 1.80)
+        run: |
+          set -euo pipefail
+          cand="$(apt-cache policy cargo | sed -nE 's/^ *Candidate: *([0-9]+\.[0-9]+).*/\1/p')"
+          if dpkg --compare-versions "${cand:-0}" ge 1.80; then
+            DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends cargo rustc
+          else
+            # Ubuntu 24.04: default rust is 1.75 < MSRV; use the archive's
+            # versioned toolchain and put it first on PATH. (mk-build-deps
+            # still installs the unversioned cargo/rustc from debian/control;
+            # PATH order makes 1.84 win.)
+            DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends cargo-1.84
+            echo "/usr/lib/rust-1.84/bin" >> "$GITHUB_PATH"
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release-tag || '' }}
+
+      - name: Trust the checkout (containerized git)
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Fetch upstream source (track-latest, mirrors make-srpm.sh)
+        id: src
+        run: |
+          set -euo pipefail
+          src="$(contrib/debian-windowtolayer/fetch-source.sh "${PWD}/wtl")"
+          echo "srcdir=${src}" >> "$GITHUB_OUTPUT"
+          dpkg-parsechangelog -l "${src}/debian/changelog" -S Version
+
+      - name: Install build dependencies
+        working-directory: ${{ steps.src.outputs.srcdir }}
+        run: |
+          mk-build-deps --install --remove \
+            --tool 'apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' \
+            debian/control
+
+      - name: Build package
+        working-directory: ${{ steps.src.outputs.srcdir }}
+        run: |
+          cargo --version && rustc --version
+          dpkg-buildpackage -us -uc -b
+
+      - name: Lintian (errors fail the build)
+        run: lintian --fail-on error --info wtl/windowtolayer_*.deb
+
+      - name: Collect .debs with distro suffix
+        id: collect
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          suffix="${ID}${VERSION_ID}"
+          artifact="debs-windowtolayer-$(echo '${{ matrix.image }}' | tr ':.' '--')"
+          mkdir -p debs
+          for deb in wtl/windowtolayer_*.deb; do
+            base="$(basename "${deb}" .deb)"
+            cp "${deb}" "debs/${base}.${suffix}.deb"
+          done
+          ls -l debs
+          echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.artifact }}
+          path: debs/*.deb
+          if-no-files-found: error
+
   release:
     # Only when called from release.yml for a freshly pushed version tag.
     if: inputs.release-tag != ''
-    needs: build
+    needs: [build, build-windowtolayer]
     runs-on: ubuntu-latest
     permissions:
       contents: write
