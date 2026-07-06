@@ -35,6 +35,12 @@ jobs:
       matrix:
         image: ['debian:stable', 'ubuntu:24.04', 'ubuntu:latest']
     container: ${{ matrix.image }}
+    defaults:
+      run:
+        # Container jobs fall back to `sh` when the runner doesn't detect
+        # bash; the scripts below use bashisms (set -o pipefail). All three
+        # images ship bash.
+        shell: bash
     steps:
       - name: Install packaging tools
         run: |
