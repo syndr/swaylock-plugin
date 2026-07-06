@@ -128,6 +128,21 @@ layer the packages instead:
 See [`contrib/rpm/README.md`](contrib/rpm/README.md) for packaging details and
 the release process.
 
+### From GitHub Releases (Debian/Ubuntu)
+
+Prebuilt `.deb` packages for Debian stable and recent Ubuntu are attached to
+each [GitHub Release](https://github.com/syndr/swaylock-plugin/releases).
+Download the file matching your distro (the suffix names it, e.g.
+`swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb`) and install it with apt:
+
+    sudo apt install ./swaylock-plugin_*.deb
+
+The package ships the same file set as the RPM: binaries, PAM configuration,
+man page, shell completions, and the Xwayland wrapper. `windowtolayer` is not
+packaged for Debian/Ubuntu yet — build it from source if you want X11
+wallpaper programs. See
+[`contrib/debian/README.md`](contrib/debian/README.md) for packaging details.
+
 ### Build from source
 
 Install dependencies:

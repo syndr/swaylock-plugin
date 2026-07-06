@@ -1,0 +1,42 @@
+Source: swaylock-plugin
+Section: x11
+Priority: optional
+Maintainer: syndr <syndr@ultroncore.net>
+# wayland-protocols is intentionally unversioned: meson.build wants >= 1.47,
+# which Debian 13 / Ubuntu 24.04 do not ship yet. When the system copy is too
+# old, meson falls back to subprojects/wayland-protocols.wrap (downloaded at
+# configure time — hence ca-certificates).
+Build-Depends:
+ debhelper-compat (= 13),
+ ca-certificates,
+ libcairo2-dev,
+ libgdk-pixbuf-2.0-dev,
+ libpam0g-dev,
+ libsystemd-dev,
+ libwayland-dev (>= 1.20.0),
+ libxkbcommon-dev,
+ meson (>= 0.59.0),
+ ninja-build,
+ pkgconf,
+ scdoc,
+ wayland-protocols,
+Standards-Version: 4.6.2
+Homepage: https://github.com/syndr/swaylock-plugin
+Rules-Requires-Root: no
+
+Package: swaylock-plugin
+Architecture: linux-any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ python3,
+Description: screen locker for Wayland compositors with animated backgrounds
+ swaylock-plugin is a fork of swaylock, a screen locking utility for
+ Wayland compositors. It can display the animated output of any wallpaper
+ program that implements the wlr-layer-shell-unstable-v1 protocol as the
+ lockscreen background: run `swaylock-plugin --command 'my-wallpaper ...'`.
+ .
+ The package ships the swaylock-plugin locker, the swaylock-sleep-watcher
+ helper (ends the unlocked grace period when the system suspends), PAM
+ configuration, a man page, shell completions, and an example Xwayland
+ wrapper for running X11 wallpaper programs through windowtolayer.

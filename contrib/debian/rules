@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --buildsystem=meson
+
+# Same feature set as contrib/rpm/swaylock-plugin.spec. --wrap-mode=default
+# overrides debhelper's nodownload so the wayland-protocols wrap fallback can
+# activate on distros whose system copy is older than 1.47 (see
+# subprojects/wayland-protocols.wrap); a new-enough system copy is preferred.
+# tests=false keeps the subproject's wayland-scanner requirement at >= 1.20
+# (with tests it wants >= 1.23, newer than Ubuntu 24.04's wayland 1.22); the
+# option is inert when the subproject is not used.
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		--wrap-mode=default \
+		-Dwayland-protocols:tests=false \
+		-Dpam=enabled \
+		-Dlogind=enabled \
+		-Dgdk-pixbuf=enabled \
+		-Dman-pages=enabled
+
+# When the wayland-protocols wrap fallback was used, meson also installs the
+# subproject (protocol XMLs, enum headers, .pc file). They are a build-time
+# input only — keep them out of the package. No-op when the system copy was
+# used.
+execute_after_dh_auto_install:
+	rm -rf debian/swaylock-plugin/usr/share/wayland-protocols \
+	       debian/swaylock-plugin/usr/share/pkgconfig \
+	       debian/swaylock-plugin/usr/include
