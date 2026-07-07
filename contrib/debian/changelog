@@ -1,0 +1,9 @@
+swaylock-plugin (1.8.6.1-1) unstable; urgency=medium
+
+  * First fork release packaged for Debian/Ubuntu. Version distinguished
+    from upstream 1.8.6 (v1.8.6 is an upstream tag).
+  * Prebuilt .debs are distributed via GitHub Releases; the CI stamps a
+    distro suffix (e.g. .ubuntu24.04.deb) on the file name only — the
+    package version stays as recorded here.
+
+ -- syndr <syndr@ultroncore.net>  Sat, 04 Jul 2026 00:00:00 +0000

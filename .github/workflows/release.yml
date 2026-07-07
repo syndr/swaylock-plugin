@@ -21,12 +21,15 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Tag if meson.build version is new and higher
+        id: tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -60,3 +63,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v${version}" -m "Release v${version}"
           git push origin "v${version}"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+  # Debian/Ubuntu packages for the fresh tag. Runs here (not on the tag push)
+  # because the tag is pushed with GITHUB_TOKEN, which reaches repo webhooks
+  # (COPR) but does not re-trigger GitHub Actions. deb.yml creates the GitHub
+  # Release for the tag if needed and attaches the .debs to it.
+  debs:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/deb.yml
+    with:
+      release-tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write

@@ -1,0 +1,34 @@
+Source: windowtolayer
+Section: x11
+Priority: optional
+Maintainer: syndr <syndr@ultroncore.net>
+# Upstream's Cargo.toml declares rust-version 1.80. cargo/rustc are left
+# unversioned so this control file is installable on Ubuntu 24.04 (default
+# rust 1.75); there, deb.yml additionally installs the archive's versioned
+# cargo-1.84 toolchain and puts /usr/lib/rust-1.84/bin first on PATH.
+# python3 and rustfmt are used by upstream's build.rs (protogen.py formats
+# the generated protocol bindings); any rustfmt version works there.
+Build-Depends:
+ debhelper-compat (= 13),
+ ca-certificates,
+ cargo,
+ python3,
+ rustc,
+ rustfmt,
+Standards-Version: 4.6.2
+Homepage: https://gitlab.freedesktop.org/mstoeckl/windowtolayer
+Rules-Requires-Root: no
+
+Package: windowtolayer
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Description: display Wayland applications as layer-shell wallpaper surfaces
+ windowtolayer transforms Wayland xdg-shell clients into clients that use
+ wlr-layer-shell, so normally windowed applications (terminals, video
+ players) can render as wallpaper surfaces on supported compositors.
+ .
+ swaylock-plugin uses it to run such programs as lockscreen backgrounds,
+ for example: swaylock-plugin --command-each
+ 'windowtolayer -- alacritty -e asciiquarium'.

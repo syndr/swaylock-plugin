@@ -1,0 +1,9 @@
+windowtolayer (0.3.1-1) unstable; urgency=medium
+
+  * Initial Debian/Ubuntu package of the upstream windowtolayer release,
+    distributed via this repo's GitHub Releases alongside swaylock-plugin.
+  * Like the COPR package, the build tracks the latest upstream stable tag:
+    contrib/debian-windowtolayer/fetch-source.sh resolves it at build time
+    and prepends a changelog entry when it is newer than this one.
+
+ -- syndr <syndr@ultroncore.net>  Mon, 06 Jul 2026 00:00:00 +0000

@@ -1,0 +1,14 @@
+; Fallback for meson.build's `dependency('wayland-protocols', version: '>=1.47',
+; fallback: 'wayland-protocols')`. Only used when the system copy is too old
+; (Debian 13 ships 1.44, Ubuntu 24.04 ships 1.45) AND the build allows wraps
+; (e.g. `meson setup --wrap-mode=default`, as contrib/debian/rules does).
+; Fedora/COPR builds use --wrap-mode=nodownload and their system copy, so this
+; file is inert there.
+[wrap-file]
+directory = wayland-protocols-1.47
+source_url = https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.47/downloads/wayland-protocols-1.47.tar.xz
+source_filename = wayland-protocols-1.47.tar.xz
+source_hash = 5fd4349bcbc9bab9a46f8cf77d1f434296a7a052c87440a094f63fcf62a58e20
+
+[provide]
+wayland-protocols = wayland_protocols

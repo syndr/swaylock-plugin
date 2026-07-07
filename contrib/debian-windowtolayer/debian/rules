@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+# Keep cargo's registry/cache inside the build tree instead of $HOME.
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+
+# Plain debhelper (no dh-cargo): upstream is a single-binary crate with a
+# committed Cargo.lock, so `cargo build --locked` pins the whole dependency
+# tree — the deb equivalent of the RPM spec's %cargo_* macros (which do not
+# vendor either). Crates are fetched from crates.io at build time.
+#
+# Needs rust >= 1.80 (upstream Cargo.toml rust-version) on PATH; see
+# debian/control for how deb.yml arranges that on Ubuntu 24.04.
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	cargo build --release --locked
+
+# No test suite worth running at package build time (upstream tests need a
+# Wayland compositor); the RPM build does not run them either.
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -Dpm0755 target/release/windowtolayer \
+		debian/windowtolayer/usr/bin/windowtolayer
+
+override_dh_auto_clean:
+	rm -rf target $(CARGO_HOME)
