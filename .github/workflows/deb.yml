@@ -86,7 +86,9 @@ jobs:
         run: dpkg-buildpackage -us -uc -b
 
       - name: Lintian (errors fail the build)
-        run: lintian --fail-on error --info ../swaylock-plugin_*.deb
+        # swaylock-plugin*_ matches both binary packages (swaylock-plugin and
+        # swaylock-plugin-screensaver)
+        run: lintian --fail-on error --info ../swaylock-plugin*_*.deb
 
       - name: Collect .debs with distro suffix
         id: collect
@@ -96,7 +98,7 @@ jobs:
           suffix="${ID}${VERSION_ID}"
           artifact="debs-$(echo '${{ matrix.image }}' | tr ':.' '--')"
           mkdir -p debs
-          for deb in ../swaylock-plugin_*.deb; do
+          for deb in ../swaylock-plugin*_*.deb; do
             base="$(basename "${deb}" .deb)"
             cp "${deb}" "debs/${base}.${suffix}.deb"
           done

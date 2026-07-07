@@ -1,0 +1,12 @@
+# Multi-binary source: dh_auto_install stages the meson install into
+# debian/tmp/ and each package lists what it takes (paths without a leading
+# source-tree component are looked up in debian/tmp). The wrapper is copied
+# straight from the source tree.
+example_xwayland_wrapper.py usr/libexec/swaylock-plugin/
+usr/bin/swaylock-plugin
+usr/bin/swaylock-sleep-watcher
+usr/share/man/man1/swaylock-plugin.1
+usr/share/bash-completion/completions/swaylock-plugin
+usr/share/fish/vendor_completions.d/swaylock-plugin.fish
+usr/share/zsh/site-functions/_swaylock-plugin
+etc/pam.d/swaylock-plugin

@@ -2,6 +2,13 @@
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
+# meson.build embeds __DATE__ in the --version string when building from a
+# git checkout (git describe succeeds). dpkg's -Wdate-time plus the project's
+# -Werror turns that into a build failure for anyone following the "build
+# locally from a clone" instructions; tarball builds (RPM) never see it.
+# Downgrade just that diagnostic.
+export DEB_CFLAGS_MAINT_APPEND = -Wno-error=date-time
+
 %:
 	dh $@ --buildsystem=meson
 
@@ -23,9 +30,11 @@ override_dh_auto_configure:
 
 # When the wayland-protocols wrap fallback was used, meson also installs the
 # subproject (protocol XMLs, enum headers, .pc file). They are a build-time
-# input only — keep them out of the package. No-op when the system copy was
+# input only — keep them out of the packages (compat 13 dh_missing fails on
+# staged-but-unlisted files). Multi-binary source since the -screensaver
+# split, so the staging dir is debian/tmp. No-op when the system copy was
 # used.
 execute_after_dh_auto_install:
-	rm -rf debian/swaylock-plugin/usr/share/wayland-protocols \
-	       debian/swaylock-plugin/usr/share/pkgconfig \
-	       debian/swaylock-plugin/usr/include
+	rm -rf debian/tmp/usr/share/wayland-protocols \
+	       debian/tmp/usr/share/pkgconfig \
+	       debian/tmp/usr/include

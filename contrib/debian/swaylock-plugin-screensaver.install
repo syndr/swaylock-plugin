@@ -1,0 +1,3 @@
+contrib/screensaver/swaylock-screensaver usr/bin/
+contrib/screensaver/swaylock-screensaver-select usr/bin/
+contrib/screensaver/swaylock-screensaver-shots usr/bin/

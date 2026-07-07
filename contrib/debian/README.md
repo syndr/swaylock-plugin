@@ -1,9 +1,15 @@
 # Debian/Ubuntu packaging
 
 Debian packaging for `swaylock-plugin`, mirroring the file set installed by
-[`contrib/rpm/swaylock-plugin.spec`](../rpm/swaylock-plugin.spec): the two
-binaries, `/etc/pam.d/swaylock-plugin` (a conffile), the man page, shell
-completions, and `/usr/libexec/swaylock-plugin/example_xwayland_wrapper.py`.
+[`contrib/rpm/swaylock-plugin.spec`](../rpm/swaylock-plugin.spec). Two binary
+packages from one source:
+
+* **`swaylock-plugin`** — the two binaries, `/etc/pam.d/swaylock-plugin`
+  (a conffile), the man page, shell completions, and
+  `/usr/libexec/swaylock-plugin/example_xwayland_wrapper.py`.
+* **`swaylock-plugin-screensaver`** (arch: all) — the xscreensaver hack
+  lockscreen tooling from [`contrib/screensaver/`](../screensaver/)
+  (mirrors the RPM's `-screensaver` subpackage).
 
 There is no PPA or external build service. GitHub is the distribution
 endpoint: `.github/workflows/deb.yml` builds the package inside Debian and

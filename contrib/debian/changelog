@@ -1,3 +1,14 @@
+swaylock-plugin (1.8.6.2-1) unstable; urgency=medium
+
+  * New binary package swaylock-plugin-screensaver: xscreensaver hack lock
+    launcher with per-hack option support (hacks.conf), rofi picker with
+    screenshot thumbnails and descriptions, and a local thumbnail generator
+    (contrib/screensaver).
+  * Source is now multi-binary: per-package install files, meson install
+    staged in debian/tmp.
+
+ -- syndr <syndr@ultroncore.net>  Mon, 06 Jul 2026 00:00:00 +0000
+
 swaylock-plugin (1.8.6.1-1) unstable; urgency=medium
 
   * First fork release packaged for Debian/Ubuntu. Version distinguished
