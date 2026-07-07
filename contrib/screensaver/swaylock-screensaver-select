@@ -25,6 +25,7 @@ DEFAULT_HACK="${DEFAULT_HACK:-xrayswarm}"
 # in whatever theme you use to see the thumbnails (element-icon size).
 ROFI_THEME="${SCREENHACK_ROFI_THEME:-}"
 PREVIEW_KEY="${SCREENHACK_PREVIEW_KEY:-Alt+p}"
+EDIT_KEY="${SCREENHACK_EDIT_KEY:-Alt+c}"
 
 SHOT_DIR="${SCREENHACK_SHOT_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/swaylock-screensaver/shots}"
 XML_DIR="${SCREENHACK_XML_DIR:-/usr/share/xscreensaver/config}"
@@ -139,6 +140,35 @@ hack_args() {
     }' "$HACKS_CONF"
 }
 
+# Open hacks.conf in $VISUAL/$EDITOR (terminal-spawned, since the picker runs
+# from a keybind). Seeds a commented template on first use. Blocks until the
+# editor closes, then the caller reopens the picker -- edit flags, preview,
+# repeat.
+edit_hacks_conf() {
+  mkdir -p "$(dirname "$HACKS_CONF")"
+  [[ -s "$HACKS_CONF" ]] || cat > "$HACKS_CONF" <<'EOF'
+# swaylock-screensaver per-hack flags: <hack> <flags...>
+# A '*' line applies to every hack; a hack's own flags are appended after it.
+# Flags each hack accepts: man <hack>, or /usr/share/xscreensaver/config/<hack>.xml
+# Test with the picker preview -- a hack that rejects its flags shows no window.
+# Examples:
+#   glmatrix   --mode dna --speed 0.5
+#   xrayswarm  --delay 10000
+#   *          --fps
+EOF
+  local editor="${VISUAL:-${EDITOR:-nano}}" term=()
+  if [[ -n "${SCREENHACK_TERMINAL:-}" ]]; then
+    term=("$SCREENHACK_TERMINAL" -e)
+  elif command -v rofi-sensible-terminal >/dev/null; then
+    term=(rofi-sensible-terminal -e)
+  else
+    notify "swaylock-screensaver" "No terminal found -- edit $HACKS_CONF manually."
+    return 0
+  fi
+  # shellcheck disable=SC2086  # $editor may carry its own flags
+  "${term[@]}" $editor "$HACKS_CONF"
+}
+
 # Live preview: run the highlighted hack windowed (no -root) with its
 # hacks.conf flags, so the preview matches what the lockscreen will show.
 preview() {
@@ -165,7 +195,8 @@ main() {
     choice=$(menu | rofi -i -dmenu "${rofi_opts[@]}" \
       -select "$select_arg" \
       -kb-custom-1 "$PREVIEW_KEY" \
-      -mesg "Current: ${current:-none (default: $DEFAULT_HACK)}  |  ${PREVIEW_KEY^}: preview (close the preview window to return)")
+      -kb-custom-2 "$EDIT_KEY" \
+      -mesg "Current: ${current:-none (default: $DEFAULT_HACK)}  |  ${PREVIEW_KEY^}: preview (close its window to return)  |  ${EDIT_KEY^}: edit hack flags")
     rc=$?
     case "$rc" in
       0) break ;;                                        # selection accepted
@@ -179,6 +210,11 @@ main() {
           wait "$preview_pid" 2>/dev/null
           preview_pid=""
         fi
+        ;;
+      11)
+        # kb-custom-2: edit hacks.conf, reopen when the editor closes.
+        edit_hacks_conf
+        select_arg="$choice"
         ;;
       *) exit 0 ;;                                       # Escape / abort
     esac

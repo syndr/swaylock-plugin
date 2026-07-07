@@ -92,6 +92,11 @@ xrayswarm  --count 8
 *          --fps            # applied to all hacks
 ```
 
+The picker's edit key (`Alt+c` by default) opens this file in
+`$VISUAL`/`$EDITOR` (spawned via `$SCREENHACK_TERMINAL` or
+`rofi-sensible-terminal`, seeded with a commented template on first use) and
+reopens the picker when the editor closes — edit flags, preview, repeat.
+
 Both the lockscreen and the picker's preview apply these, so previews match
 what the lock will show. A trailing ` # comment` is stripped. Args pass
 through one shell level — quote inside the value if an argument contains
@@ -153,6 +158,8 @@ vidwhacker a video source, ...) — they'd be equally blank as lock backgrounds.
 | `SWAYLOCK_SCREENSAVER_FALLBACK_BG` | `auto` (chosen hack's screenshot; `none` or an image path) | launcher |
 | `SCREENHACK_ROFI_THEME` | *(rofi default config)* | picker |
 | `SCREENHACK_PREVIEW_KEY` | `Alt+p` | picker |
+| `SCREENHACK_EDIT_KEY` | `Alt+c` (opens hacks.conf in `$VISUAL`/`$EDITOR`) | picker |
+| `SCREENHACK_TERMINAL` | *(rofi-sensible-terminal)* — terminal for the editor | picker |
 | `SCREENHACK_XML_DIR` | `/usr/share/xscreensaver/config` | picker (descriptions) |
 | `SCREENHACK_SHOT_DIR` | `$XDG_CACHE_HOME/swaylock-screensaver/shots` | picker, shots |
 | `SCREENHACK_SHOT_WARMUP` | `8` (seconds) | shots |
