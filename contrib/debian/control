@@ -40,3 +40,28 @@ Description: screen locker for Wayland compositors with animated backgrounds
  helper (ends the unlocked grace period when the system suspends), PAM
  configuration, a man page, shell completions, and an example Xwayland
  wrapper for running X11 wallpaper programs through windowtolayer.
+
+Package: swaylock-plugin-screensaver
+Architecture: all
+Depends:
+ ${misc:Depends},
+ swaylock-plugin (= ${source:Version}),
+ windowtolayer,
+Recommends:
+ rofi,
+ xscreensaver-data,
+Suggests:
+ imagemagick,
+ xscreensaver-data-extra,
+ xscreensaver-gl,
+ xvfb,
+Description: xscreensaver hack lockscreen tooling for swaylock-plugin
+ Lock the session with a live xscreensaver "hack" animating on every
+ output, via swaylock-plugin --command-each, windowtolayer, and the
+ packaged Xwayland wrapper.
+ .
+ Ships swaylock-screensaver (fail-safe lock launcher with per-hack option
+ support), swaylock-screensaver-select (rofi picker with screenshot
+ thumbnails, per-hack descriptions, and live preview), and
+ swaylock-screensaver-shots (local thumbnail generator using a headless
+ Xvfb display).

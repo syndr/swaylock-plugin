@@ -206,6 +206,20 @@ without `xorg-x11-server-common`; create it once:
 
     sudo install -d -m 1777 /var/lib/xkb
 
+##### Screensaver picker add-on
+
+The `swaylock-plugin-screensaver` package (COPR RPM subpackage; Debian/Ubuntu
+`.deb` on the GitHub Releases) wraps the whole xscreensaver-hack workflow:
+`swaylock-screensaver` as your idle daemon's fail-safe lock command, a rofi
+picker with screenshot thumbnails, per-hack descriptions, and live preview
+(`swaylock-screensaver-select`), per-hack tuning flags via a simple
+`hacks.conf`, and a local thumbnail generator. See
+[`contrib/screensaver/`](contrib/screensaver/) for setup and every knob:
+
+    sudo dnf install swaylock-plugin-screensaver
+    swaylock-screensaver-select   # pick a hack
+    swaylock-screensaver          # lock
+
 ##### Without PAM
 
 On systems without PAM, `swaylock-plugin` uses `shadow.h`.
