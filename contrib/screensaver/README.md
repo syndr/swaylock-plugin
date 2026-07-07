@@ -99,9 +99,26 @@ spaces. Each hack documents its flags in `man <hack>` and in
 `/usr/share/xscreensaver/config/<hack>.xml`.
 
 A flag the hack does not accept makes it exit immediately: the session still
-locks (fail-secure) but on a plain background instead of the animation. Test
-flags with the picker's preview first — a hack that rejects your flags will
-show no preview window.
+locks (fail-secure) on the fallback background (below) instead of the
+animation. Test flags with the picker's preview first — a hack that rejects
+your flags will show no preview window.
+
+## Theming the fallback background
+
+If the hack dies or never starts, swaylock-plugin falls back to its normal
+swaylock background. Two layers of control:
+
+- **Screenshot fallback (default)**: `swaylock-screensaver` passes
+  `--image <shot>` of the chosen hack when
+  `swaylock-screensaver-shots` has generated one — the lockscreen degrades to
+  a still of the animation you picked rather than a blank screen. Control
+  with `SWAYLOCK_SCREENSAVER_FALLBACK_BG`: `auto` (default), `none`, or a
+  path to any image.
+- **swaylock theming**: everything else (background color, indicator ring
+  colors, font, ...) is standard swaylock configuration — put
+  `long-option=value` lines in `~/.config/swaylock/config`, e.g.
+  `color=1e1e2e` to replace the default light gray. Command-line flags from
+  the launcher override the config file.
 
 ## Thumbnails
 
@@ -133,6 +150,7 @@ vidwhacker a video source, ...) — they'd be equally blank as lock backgrounds.
 | `DEFAULT_HACK` | `xrayswarm` | launcher, picker |
 | `WRAPPER` | `/usr/libexec/swaylock-plugin/example_xwayland_wrapper.py` | launcher |
 | `SWAYLOCK_SCREENSAVER_FALLBACK` | `swaylock` | launcher |
+| `SWAYLOCK_SCREENSAVER_FALLBACK_BG` | `auto` (chosen hack's screenshot; `none` or an image path) | launcher |
 | `SCREENHACK_ROFI_THEME` | *(rofi default config)* | picker |
 | `SCREENHACK_PREVIEW_KEY` | `Alt+p` | picker |
 | `SCREENHACK_XML_DIR` | `/usr/share/xscreensaver/config` | picker (descriptions) |
