@@ -118,6 +118,7 @@ struct swaylock_bg_server {
 	struct wl_event_loop *loop;
 	struct wl_global *wlr_layer_shell;
 	struct wl_global *compositor;
+	struct wl_global *subcompositor;
 	struct wl_global *shm;
 	struct wl_global *xdg_output_manager;
 	struct wl_global *zwp_linux_dmabuf;
@@ -187,10 +188,8 @@ struct forward_state {
 	/* list of wl_resources corresponding to (default/surface) feedback instances
 	 * that should get updated when the upstream feedback is updated */
 	struct wl_list feedback_instances;
-	/* We only let the background generator create surfaces, but not
-	 * subsurfaces, because those are much trickier to implement correctly,
-	 * and a well designed background shouldn't need them anyway. */
 	struct wl_compositor *compositor;
+	struct wl_subcompositor *subcompositor;
 
 	struct wp_viewporter *viewporter;
 	struct wp_fractional_scale_manager_v1 *fractional_scale;
@@ -339,6 +338,14 @@ void unref_image_description_props(struct image_description_properties *s);
 struct image_description_properties *create_image_description_props(void);
 
 
+struct subsurface_entry {
+	int32_t pos_x, pos_y;
+	bool is_desync;
+	struct forward_surface *surface;
+	/* Link to position in subsurface stack. */
+	struct wl_list link;
+};
+
 struct surface_state {
 	/* wl_buffer, invoke get_resource for upstream */
 	struct forward_buffer *attachment;
@@ -368,7 +375,13 @@ struct surface_state {
 	struct forward_image_desc *image_desc;
 	uint32_t render_intent; // this only applies if image_desc != NULL
 	struct wl_list image_desc_link;
+
+	/* Stacks of subsurfaces above the surface; the next element is closest. */
+	struct wl_list subsurfaces_above;
+	/* Stacks of subsurfaces below the surface; the previous element is closest. */
+	struct wl_list subsurfaces_below;
 };
+
 
 struct serial_pair {
 	uint32_t plugin_serial;
@@ -383,9 +396,26 @@ struct serial_pair {
 	bool local_only;
 };
 
+/* An "augmented" wl_surface with standard additional interfaces added when
+ * available. Used in both sway_surface (long term) and forward_surface in
+ * a subsurface role.
+ */
+struct augmented_surface {
+	struct wl_surface *surface;
+	struct wp_viewport *viewport;
+	struct wp_color_representation_surface_v1 *color_rep_surface;
+	struct wp_color_management_surface_v1 *color_surface;
+};
+
+/* A list of wl_surface frame callbacks to trigger when a parent callback completes */
+struct frame_callbacks {
+	struct wl_list list;
+};
+
 /* this is a resource associated to a downstream wl_surface */
 struct forward_surface {
 	bool has_been_configured;
+	struct wl_resource *surface;
 	struct wl_resource *layer_surface; // downstream only
 
 	/* Used to look up global properties like default parametric image description */
@@ -393,10 +423,21 @@ struct forward_surface {
 
 	/* is null until get_layer_surface is called and initializes this */
 	struct swaylock_surface *sway_surface;
-	// set after layer surface is destroyed
+	// set after layer surface (or parent) is destroyed
 	bool inert;
+	/* Immediate parent of the subsurface. */
+	struct forward_surface *subsurface_parent;
+	struct wl_resource *subsurface;
+	/* The external wl_surface and associated fields corresponding to this
+	 * surface, if it exists */
+	struct augmented_surface ext_surface;
+	/* The external wl_subsurface corresponding to this surface, if is exists */
+	struct wl_subsurface *ext_subsurface;
+	/* These are present if their link is not an empty list */
+	struct subsurface_entry subsurf_pending_entry;
+	struct subsurface_entry subsurf_committed_entry;
 
-	/* list of callbacks for wl_surface::frame */
+	/* list of downstream callbacks for wl_surface::frame */
 	struct wl_list frame_callbacks;
 
 	// double-buffered state
@@ -472,17 +513,14 @@ struct swaylock_surface {
 	struct swaylock_state *state;
 	struct wl_output *output;
 	uint32_t output_global_name;
-	struct wl_surface *surface; // surface for background
+	struct augmented_surface surface; // surface for background
 	struct wl_surface *child; // indicator surface made into subsurface
 	struct wl_subsurface *subsurface;
 
 	struct forward_surface *plugin_surface;
 
 	struct ext_session_lock_surface_v1 *ext_session_lock_surface_v1;
-	struct wp_viewport *viewport;
 	struct wp_fractional_scale_v1* fractional_scale;
-	struct wp_color_representation_surface_v1 *color_rep_surface;
-	struct wp_color_management_surface_v1 *color_surface;
 	struct wp_color_management_output_v1 *color_output;
 	struct wp_image_description_v1 *color_output_description;
 	uint32_t last_fractional_scale; /* is zero if nothing received yet */
@@ -553,6 +591,7 @@ struct swaylock_surface {
  * to crash swaylock than to crash the compositor.
  */
 void bind_wl_compositor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+void bind_wl_subcompositor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 void bind_wl_shm(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 void bind_linux_dmabuf(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 void bind_drm(struct wl_client *client, void *data, uint32_t version, uint32_t id);

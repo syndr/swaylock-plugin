@@ -67,9 +67,9 @@ void render(struct swaylock_surface *surface) {
 
 	render_frame(surface);
 	surface->dirty = false;
-	surface->frame = wl_surface_frame(surface->surface);
+	surface->frame = wl_surface_frame(surface->surface.surface);
 	wl_callback_add_listener(surface->frame, &surface_frame_listener, surface);
-	wl_surface_commit(surface->surface);
+	wl_surface_commit(surface->surface.surface);
 }
 
 static void configure_font_drawing(cairo_t *cairo, struct swaylock_state *state,

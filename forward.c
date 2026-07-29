@@ -21,6 +21,7 @@
 
 
 static const struct wl_surface_interface surface_impl;
+static const struct wl_subsurface_interface subsurface_impl;
 static const struct wl_buffer_interface buffer_impl;
 static const struct wl_shm_pool_interface shm_pool_impl;
 static const struct wl_compositor_interface compositor_impl;
@@ -34,6 +35,8 @@ static const struct wp_color_management_surface_v1_interface color_surface_impl;
 static const struct wp_image_description_v1_interface image_desc_impl;
 static const struct wp_color_representation_surface_v1_interface color_rep_surface_impl;
 static void delete_image_desc_if_unreferenced(struct forward_image_desc* desc);
+static void apply_pending_surface_updates(struct forward_surface *surface,
+	struct augmented_surface *background, struct forward_state *state, bool synchronized);
 
 struct forward_params {
 	struct zwp_linux_buffer_params_v1* params;
@@ -56,6 +59,13 @@ static bool does_transform_transpose_size(int32_t transform) {
 	case WL_OUTPUT_TRANSFORM_FLIPPED_270:
 		return false;
 	}
+}
+
+static void wl_list_insert_before(struct wl_list *ref, struct wl_list *elm) {
+	elm->next = ref;
+	elm->prev = ref->prev;
+	ref->prev = elm;
+	elm->prev->next = elm;
 }
 
 static void nested_surface_destroy(struct wl_client *client,
@@ -156,22 +166,276 @@ void add_serial_pair(struct forward_surface *surf, uint32_t upstream_serial,
 }
 
 static void bg_frame_handle_done(void *data, struct wl_callback *callback,
-		uint32_t time) {
-	(void)time;
-	struct forward_surface *surface = data;
+		uint32_t dummy) {
+	(void)dummy;
+	struct frame_callbacks *callbacks = data;
 
 	// Trigger all frame callbacks for the background
 	struct wl_resource *plugin_cb, *tmp;
-	wl_resource_for_each_safe(plugin_cb, tmp, &surface->frame_callbacks) {
+	wl_resource_for_each_safe(plugin_cb, tmp, &callbacks->list) {
 		wl_callback_send_done(plugin_cb, 0);
+		wl_list_remove(wl_resource_get_link(plugin_cb));
+		wl_list_init(wl_resource_get_link(plugin_cb));
 		wl_resource_destroy(plugin_cb);
 	}
-	wl_callback_destroy(callback);
+
+	assert(wl_list_empty(&callbacks->list));
+	free(data);
 }
 
 static const struct wl_callback_listener bg_frame_listener = {
 	.done = bg_frame_handle_done,
 };
+
+static void apply_pending_subsurf_entry(struct subsurface_entry *entry,
+		struct forward_surface *surface, struct wl_surface *last_surface, bool synchronized) {
+	if (!entry->surface->ext_subsurface) {
+		entry->surface->ext_subsurface =
+			wl_subcompositor_get_subsurface(
+				surface->state->subcompositor, entry->surface->ext_surface.surface,
+				surface->sway_surface->surface.surface);
+	}
+	if (entry->is_desync) {
+		wl_subsurface_set_desync(entry->surface->ext_subsurface);
+	} else {
+		wl_subsurface_set_sync(entry->surface->ext_subsurface);
+		synchronized = true;
+	}
+	wl_subsurface_set_position(entry->surface->ext_subsurface, entry->pos_x, entry->pos_y);
+
+	assert(&entry->surface->subsurf_pending_entry == entry);
+	entry->surface->subsurf_committed_entry.is_desync = entry->is_desync;
+	entry->surface->subsurf_committed_entry.pos_x = entry->pos_x;
+	entry->surface->subsurf_committed_entry.pos_y = entry->pos_y;
+
+	if (synchronized) {
+		// TODO: does the synchronized content update mode require special handling?
+	}
+}
+
+static void apply_pending_surface_updates(struct forward_surface *surface,
+	struct augmented_surface *background, struct forward_state *state, bool synchronized) {
+
+
+	// TODO: the "committed" state should actually be a property of the swaylock_surface
+	// as it sticks around between client replacements; and subsurfaces should be implemented
+	// as longer-lived "swaylock_subsurface" objects so that restarting a plugin that always
+	// uses the same subsurfaces appears seamless
+	if (surface->committed.buffer_scale != surface->pending.buffer_scale) {
+		wl_surface_set_buffer_scale(background->surface, surface->pending.buffer_scale);
+		surface->committed.buffer_scale = surface->pending.buffer_scale;
+	}
+	if (surface->committed.buffer_transform != surface->pending.buffer_transform) {
+		wl_surface_set_buffer_transform(background->surface, surface->pending.buffer_transform);
+		surface->committed.buffer_transform = surface->pending.buffer_transform;
+	}
+	if (surface->committed.viewport_dest_width != surface->pending.viewport_dest_width ||
+			surface->committed.viewport_dest_height != surface->pending.viewport_dest_height) {
+		assert(background->viewport);
+		wp_viewport_set_destination(background->viewport, surface->pending.viewport_dest_width,
+			surface->pending.viewport_dest_height);
+		surface->committed.viewport_dest_width = surface->pending.viewport_dest_width;
+		surface->committed.viewport_dest_height = surface->pending.viewport_dest_height;
+	}
+	if (surface->committed.viewport_source_x != surface->pending.viewport_source_x ||
+			surface->committed.viewport_source_y != surface->pending.viewport_source_y ||
+			surface->committed.viewport_source_w != surface->pending.viewport_source_w ||
+			surface->committed.viewport_source_h != surface->pending.viewport_source_h) {
+		assert(background->viewport);
+		wp_viewport_set_source(background->viewport,
+			surface->committed.viewport_source_x, surface->committed.viewport_source_y,
+			surface->committed.viewport_source_w, surface->committed.viewport_source_h);
+		surface->committed.viewport_source_x = surface->pending.viewport_source_x;
+		surface->committed.viewport_source_y = surface->pending.viewport_source_y;
+		surface->committed.viewport_source_w = surface->pending.viewport_source_w;
+		surface->committed.viewport_source_h = surface->pending.viewport_source_h;
+	}
+
+	if (surface->committed.has_alpha_mode != surface->pending.has_alpha_mode ||
+			surface->committed.alpha_mode != surface->pending.alpha_mode ||
+			surface->committed.has_chroma_location != surface->pending.has_chroma_location ||
+			surface->committed.chroma_location != surface->pending.chroma_location ||
+			surface->committed.has_coef_range != surface->pending.has_coef_range ||
+			surface->committed.coefficients != surface->pending.coefficients ||
+			surface->committed.range != surface->pending.range) {
+		assert(background->color_rep_surface);
+		// There is no way to reset color representation parameters to default
+		// other than unsetting and recreating the surface. To simplify the logic,
+		// recreate the color rep surface on every change.
+		wp_color_representation_surface_v1_destroy(background->color_rep_surface);
+		background->color_rep_surface = wp_color_representation_manager_v1_get_surface(
+			state->color_representation, background->surface);
+		if (surface->pending.has_alpha_mode) {
+			wp_color_representation_surface_v1_set_alpha_mode(
+				background->color_rep_surface, surface->pending.alpha_mode);
+		}
+		if (surface->pending.has_chroma_location) {
+			wp_color_representation_surface_v1_set_chroma_location(
+				background->color_rep_surface, surface->pending.chroma_location);
+		}
+		if (surface->pending.has_coef_range) {
+			wp_color_representation_surface_v1_set_coefficients_and_range(
+				background->color_rep_surface, surface->pending.coefficients,
+				surface->pending.range);
+		}
+		surface->committed.has_alpha_mode = surface->pending.has_alpha_mode;
+		surface->committed.alpha_mode = surface->pending.alpha_mode;
+		surface->committed.has_chroma_location = surface->pending.has_chroma_location;
+		surface->committed.chroma_location = surface->pending.chroma_location;
+		surface->committed.has_coef_range = surface->pending.has_coef_range;
+		surface->committed.coefficients = surface->pending.coefficients;
+		surface->committed.range = surface->pending.range;
+	}
+
+	if (surface->committed.image_desc != surface->pending.image_desc ||
+		surface->committed.render_intent != surface->pending.render_intent) {
+		assert(background->color_surface);
+		if (!surface->pending.image_desc) {
+			wp_color_management_surface_v1_unset_image_description(
+				background->color_surface);
+		} else {
+			wp_color_management_surface_v1_set_image_description(
+				background->color_surface, surface->pending.image_desc->description,
+				surface->pending.render_intent);
+		}
+		if (surface->committed.image_desc != surface->pending.image_desc) {
+			if (surface->committed.image_desc) {
+				wl_list_remove(&surface->committed.image_desc_link);
+				delete_image_desc_if_unreferenced(surface->committed.image_desc);
+			}
+			if (surface->pending.image_desc) {
+				surface->committed.image_desc = surface->pending.image_desc;
+				wl_list_insert(&surface->pending.image_desc->committed_surfaces,
+					&surface->committed.image_desc_link);
+			} else {
+				surface->committed.image_desc = NULL;
+				wl_list_init(&surface->committed.image_desc_link);
+			}
+		}
+		surface->committed.render_intent = surface->pending.render_intent;
+	}
+
+	int surface_version = wl_resource_get_version(surface->surface);
+
+	// The protocol does not make this fully explicit, but the buffer should
+	// be attached _each time_ that any damage is sent alongside it, even if
+	// the buffer is the same. This is also necessary to ensure that the
+	// appropriate release events are sent
+	if (surface->pending.attachment != BUFFER_COMMITTED) {
+		/* unlink the committed attachment */
+		if (surface->committed.attachment != NULL && surface->committed.attachment != BUFFER_UNREACHABLE) {
+			assert(surface->committed.attachment->resource != NULL);
+			wl_list_remove(&surface->committed.attachment_link);
+		}
+
+		if (surface->pending.attachment != NULL) {
+			struct forward_buffer *upstream_buffer = surface->pending.attachment;
+			int32_t offset_x =  surface_version >= 5 ? 0 : surface->pending.offset_x;
+			int32_t offset_y =  surface_version >= 5 ? 0 : surface->pending.offset_y;
+			wl_surface_attach(background->surface,
+				upstream_buffer ? upstream_buffer->buffer : NULL,
+				offset_x, offset_y);
+			if (surface_version < 5) {
+				surface->committed.offset_x = surface->pending.offset_x;
+				surface->committed.offset_y = surface->pending.offset_y;
+			}
+			surface->committed.attachment = surface->pending.attachment;
+
+			surface->committed_buffer_width = upstream_buffer->width;
+			surface->committed_buffer_height = upstream_buffer->height;
+			wl_list_insert(&upstream_buffer->committed_surfaces, &surface->committed.attachment_link);
+		} else {
+			/* See above: null attachments are either bad wallpaper program
+			 * behavior or need no commit, and should not occur for the main
+			 * surface */
+			assert(!surface->layer_surface);
+			surface->committed.attachment = NULL;
+		}
+	}
+
+
+	/* If there was an offset change, but no buffer value change */
+	if ((surface->committed.offset_x != surface->pending.offset_x ||
+			surface->committed.offset_y != surface->pending.offset_y) &&
+				surface_version >= 5) {
+		wl_surface_offset(background->surface, surface->pending.offset_x, surface->pending.offset_y);
+		surface->committed.offset_x = surface->pending.offset_x;
+		surface->committed.offset_y = surface->pending.offset_y;
+	}
+
+	/* apply and clear damage */
+	for (size_t i = 0; i < surface->buffer_damage_len; i++) {
+		wl_surface_damage_buffer(background->surface, surface->buffer_damage[i].x,
+			surface->buffer_damage[i].y,
+			surface->buffer_damage[i].w,
+			surface->buffer_damage[i].h);
+	}
+	for (size_t i = 0; i < surface->old_damage_len; i++) {
+		wl_surface_damage(background->surface, surface->old_damage[i].x,
+			surface->old_damage[i].y,
+			surface->old_damage[i].w,
+			surface->old_damage[i].h);
+	}
+
+	free(surface->buffer_damage);
+	surface->buffer_damage = NULL;
+	surface->buffer_damage_len = 0;
+
+	free(surface->old_damage);
+	surface->old_damage = NULL;
+	surface->old_damage_len = 0;
+
+
+	// TODO: fix handling of sync surface content updates
+	struct subsurface_entry *entry, *tmp_entry;
+	wl_list_for_each_safe(entry, tmp_entry, &surface->committed.subsurfaces_above, link) {
+		// TODO: remove the committed surface if necessary
+		wl_list_remove(&entry->link);
+		wl_list_init(&entry->link);
+	}
+	wl_list_for_each_reverse_safe(entry, tmp_entry, &surface->committed.subsurfaces_below, link) {
+		// TODO: remove the committed surface if necessary
+		wl_list_remove(&entry->link);
+		wl_list_init(&entry->link);
+	}
+
+	struct wl_surface *last_surface = background->surface;
+	wl_list_for_each(entry, &surface->pending.subsurfaces_above, link) {
+		apply_pending_subsurf_entry(entry, surface, last_surface, synchronized);
+		wl_subsurface_place_above(entry->surface->ext_subsurface, last_surface);
+
+		last_surface = entry->surface->ext_surface.surface;
+		wl_list_insert_before(&surface->committed.subsurfaces_above,
+			&entry->surface->subsurf_committed_entry.link);
+	}
+	last_surface = background->surface;
+	wl_list_for_each_reverse(entry, &surface->pending.subsurfaces_below, link) {
+		apply_pending_subsurf_entry(entry, surface, last_surface, synchronized);
+		wl_subsurface_place_below(entry->surface->ext_subsurface, last_surface);
+
+		last_surface = entry->surface->ext_surface.surface;
+		wl_list_insert(&surface->committed.subsurfaces_below,
+			&entry->surface->subsurf_committed_entry.link);
+	}
+
+
+	if (!wl_list_empty(&surface->frame_callbacks)) {
+		/* plugin has requested frame callbacks, so make a request now. Move the
+		 * list of callbacks to trigger to a new object to avoid triggering newer
+		 * callbacks and to better handle early surface destruction */
+		struct wl_callback *callback = wl_surface_frame(background->surface);
+		struct frame_callbacks *callbacks = calloc(1, sizeof(struct frame_callbacks));
+		assert(callbacks); // TODO handle error
+		callbacks->list = surface->frame_callbacks;
+		callbacks->list.next->prev = &callbacks->list;
+		callbacks->list.prev->next = &callbacks->list;
+		wl_list_init(&surface->frame_callbacks);
+
+		// TODO: if the callback fails to trigger, this leaks; all the frame callbacks
+		// should be forcibly triggered when the surface is destroyed
+		wl_callback_add_listener(callback, &bg_frame_listener, callbacks);
+	}
+}
 
 static void nested_surface_commit(struct wl_client *client,
 		struct wl_resource *resource) {
@@ -181,10 +445,20 @@ static void nested_surface_commit(struct wl_client *client,
 		return;
 	}
 
+	if (surface->subsurface_parent) {
+		/* This surface has a subsurface role, so forward any commit messages */
+
+		apply_pending_surface_updates(surface, &surface->ext_surface, surface->state, false);
+
+		wl_surface_commit(surface->ext_surface.surface);
+	}
+
+
 	if (!surface->sway_surface) {
 		/* Clients can create and commit to any number of wl_surfaces; however,
 		 * these have no impact until the surface is given a role. Ignore these
 		 * commits. */
+
 		return;
 	}
 
@@ -248,144 +522,12 @@ static void nested_surface_commit(struct wl_client *client,
 		return;
 	}
 
-	// todo: every buffer needs surface backreferences for auto-cleanup
-	// issue: figuring out details of this auto-cleanup
-	// (one approach: use a forward_buffer object holding the upstream,
-	// with a linked list of downstream users -- the plugin's wl_buffer
-	// itself, but also all surfaces linked via commits. Only delete upstream
-	// wl_buffer when all references are dead.)
-
-	// integrate details, and commit/send updated data only, here
-
 	struct swaylock_surface *sw_surf = surface->sway_surface;
-	struct wl_surface *background = sw_surf->surface;
+	struct augmented_surface *background = &sw_surf->surface;
 
-	/* Apply changes */
-	if (surface->committed.buffer_scale != surface->pending.buffer_scale) {
-		wl_surface_set_buffer_scale(background, surface->pending.buffer_scale);
-		surface->committed.buffer_scale = surface->pending.buffer_scale;
-	}
-	if (surface->committed.buffer_transform != surface->pending.buffer_transform) {
-		wl_surface_set_buffer_transform(background, surface->pending.buffer_transform);
-		surface->committed.buffer_transform = surface->pending.buffer_transform;
-	}
-	if (surface->committed.viewport_dest_width != surface->pending.viewport_dest_width ||
-			surface->committed.viewport_dest_height != surface->pending.viewport_dest_height) {
-		assert(sw_surf->viewport);
-		wp_viewport_set_destination(sw_surf->viewport, surface->pending.viewport_dest_width,
-			surface->pending.viewport_dest_height);
-		surface->committed.viewport_dest_width = surface->pending.viewport_dest_width;
-		surface->committed.viewport_dest_height = surface->pending.viewport_dest_height;
-	}
-	if (surface->committed.viewport_source_x != surface->pending.viewport_source_x ||
-			surface->committed.viewport_source_y != surface->pending.viewport_source_y ||
-			surface->committed.viewport_source_w != surface->pending.viewport_source_w ||
-			surface->committed.viewport_source_h != surface->pending.viewport_source_h) {
-		assert(sw_surf->viewport);
-		wp_viewport_set_source(sw_surf->viewport,
-			surface->committed.viewport_source_x, surface->committed.viewport_source_y,
-			surface->committed.viewport_source_w, surface->committed.viewport_source_h);
-		surface->committed.viewport_source_x = surface->pending.viewport_source_x;
-		surface->committed.viewport_source_y = surface->pending.viewport_source_y;
-		surface->committed.viewport_source_w = surface->pending.viewport_source_w;
-		surface->committed.viewport_source_h = surface->pending.viewport_source_h;
-	}
+	apply_pending_surface_updates(surface, &sw_surf->surface, surface->state, false);
 
-	if (surface->committed.has_alpha_mode != surface->pending.has_alpha_mode ||
-			surface->committed.alpha_mode != surface->pending.alpha_mode ||
-			surface->committed.has_chroma_location != surface->pending.has_chroma_location ||
-			surface->committed.chroma_location != surface->pending.chroma_location ||
-			surface->committed.has_coef_range != surface->pending.has_coef_range ||
-			surface->committed.coefficients != surface->pending.coefficients ||
-			surface->committed.range != surface->pending.range) {
-		assert(sw_surf->color_rep_surface);
-		// There is no way to reset color representation parameters to default
-		// other than unsetting and recreating the surface. To simplify the logic,
-		// recreate the color rep surface on every change.
-		wp_color_representation_surface_v1_destroy(sw_surf->color_rep_surface);
-		sw_surf->color_rep_surface = wp_color_representation_manager_v1_get_surface(
-			sw_surf->state->forward.color_representation, sw_surf->surface);
-		if (surface->pending.has_alpha_mode) {
-			wp_color_representation_surface_v1_set_alpha_mode(
-				sw_surf->color_rep_surface, surface->pending.alpha_mode);
-		}
-		if (surface->pending.has_chroma_location) {
-			wp_color_representation_surface_v1_set_chroma_location(
-				sw_surf->color_rep_surface, surface->pending.chroma_location);
-		}
-		if (surface->pending.has_coef_range) {
-			wp_color_representation_surface_v1_set_coefficients_and_range(
-				sw_surf->color_rep_surface, surface->pending.coefficients,
-				surface->pending.range);
-		}
-		surface->committed.has_alpha_mode = surface->pending.has_alpha_mode;
-		surface->committed.alpha_mode = surface->pending.alpha_mode;
-		surface->committed.has_chroma_location = surface->pending.has_chroma_location;
-		surface->committed.chroma_location = surface->pending.chroma_location;
-		surface->committed.has_coef_range = surface->pending.has_coef_range;
-		surface->committed.coefficients = surface->pending.coefficients;
-		surface->committed.range = surface->pending.range;
-	}
-
-	if (surface->committed.image_desc != surface->pending.image_desc ||
-		surface->committed.render_intent != surface->pending.render_intent) {
-		assert(sw_surf->color_surface);
-		if (!surface->pending.image_desc) {
-			wp_color_management_surface_v1_unset_image_description(
-				sw_surf->color_surface);
-		} else {
-			wp_color_management_surface_v1_set_image_description(
-				sw_surf->color_surface, surface->pending.image_desc->description,
-				surface->pending.render_intent);
-		}
-		if (surface->committed.image_desc != surface->pending.image_desc) {
-			if (surface->committed.image_desc) {
-				wl_list_remove(&surface->committed.image_desc_link);
-				delete_image_desc_if_unreferenced(surface->committed.image_desc);
-			}
-			if (surface->pending.image_desc) {
-				surface->committed.image_desc = surface->pending.image_desc;
-				wl_list_insert(&surface->pending.image_desc->committed_surfaces,
-					&surface->committed.image_desc_link);
-			} else {
-				surface->committed.image_desc = NULL;
-				wl_list_init(&surface->committed.image_desc_link);
-			}
-		}
-		surface->committed.render_intent = surface->pending.render_intent;
-	}
-
-	// The protocol does not make this fully explicit, but the buffer should
-	// be attached _each time_ that any damage is sent alongside it, even if
-	// the buffer is the same. This is also necessary to ensure that the
-	// appropriate release events are sent
-	if (surface->pending.attachment != BUFFER_COMMITTED) {
-		/* unlink the committed attachment */
-		if (surface->committed.attachment != NULL && surface->committed.attachment != BUFFER_UNREACHABLE) {
-			assert(surface->committed.attachment->resource != NULL);
-			wl_list_remove(&surface->committed.attachment_link);
-		}
-
-		/* See above: null attachments are either bad wallpaper program behavior or need no commit */
-		assert(surface->pending.attachment != NULL);
-
-		struct forward_buffer *upstream_buffer = surface->pending.attachment;
-		int32_t offset_x =  wl_resource_get_version(resource) >= 5 ? 0 : surface->pending.offset_x;
-		int32_t offset_y =  wl_resource_get_version(resource) >= 5 ? 0 : surface->pending.offset_y;
-		wl_surface_attach(background,
-			upstream_buffer ? upstream_buffer->buffer : NULL,
-			offset_x, offset_y);
-		if (wl_resource_get_version(resource) < 5) {
-			surface->committed.offset_x = surface->pending.offset_x;
-			surface->committed.offset_y = surface->pending.offset_y;
-		}
-		surface->committed.attachment = surface->pending.attachment;
-
-		surface->committed_buffer_width = upstream_buffer->width;
-		surface->committed_buffer_height = upstream_buffer->height;
-		wl_list_insert(&upstream_buffer->committed_surfaces, &surface->committed.attachment_link);
-	}
-
+	/* Verify that the surface dimensions exactly match the output */
 	wl_fixed_t n = wl_fixed_from_int(-1);
 	bool viewport_dst_on = surface->committed.viewport_dest_width != -1;
 	bool viewport_src_on = surface->committed.viewport_source_w != n;
@@ -417,6 +559,7 @@ static void nested_surface_commit(struct wl_client *client,
 			output_height = tmp;
 		}
 	}
+
 	if (output_width != surface->last_acked_width || output_height != surface->last_acked_height) {
 		swaylock_log(LOG_ERROR, "Wallpaper program committed surface at size %d x %d, which does not exactly match last acknowledged W x H = %d x %d",
 			output_width, output_height, surface->last_acked_width, surface->last_acked_height);
@@ -424,48 +567,10 @@ static void nested_surface_commit(struct wl_client *client,
 		return;
 	}
 
-	// TODO: verify that on scale or attachment change, the resulting size exactly matches the output
-
-	/* If there was an offset change, but no buffer value change */
-	if ((surface->committed.offset_x != surface->pending.offset_x ||
-			surface->committed.offset_y != surface->pending.offset_y) && wl_resource_get_version(resource) >= 5) {
-		wl_surface_offset(background, surface->pending.offset_x, surface->pending.offset_y);
-		surface->committed.offset_x = surface->pending.offset_x;
-		surface->committed.offset_y = surface->pending.offset_y;
-	}
-
-	/* apply and clear damage */
-	for (size_t i = 0; i < surface->buffer_damage_len; i++) {
-		wl_surface_damage_buffer(background, surface->buffer_damage[i].x,
-			surface->buffer_damage[i].y,
-			surface->buffer_damage[i].w,
-			surface->buffer_damage[i].h);
-	}
-	for (size_t i = 0; i < surface->old_damage_len; i++) {
-		wl_surface_damage(background, surface->old_damage[i].x,
-			surface->old_damage[i].y,
-			surface->old_damage[i].w,
-			surface->old_damage[i].h);
-	}
-
-	free(surface->buffer_damage);
-	surface->buffer_damage = NULL;
-	surface->buffer_damage_len = 0;
-
-	free(surface->old_damage);
-	surface->old_damage = NULL;
-	surface->old_damage_len = 0;
-
 	/* Finally, commit updates to corresponding upstream background surface */
 	if (surface->committed.attachment) {
 		// permit subsurface drawing
 		surface->sway_surface->has_buffer = true;
-	}
-
-	if (!wl_list_empty(&surface->frame_callbacks)) {
-		/* plugin has requested frame callbacks, so make a request now */
-		struct wl_callback *callback = wl_surface_frame(background);
-		wl_callback_add_listener(callback, &bg_frame_listener, surface);
 	}
 
 	if (sw_surf->has_pending_ack_conf) {
@@ -486,7 +591,7 @@ static void nested_surface_commit(struct wl_client *client,
 		sw_surf->client_submission_timer = NULL;
 	}
 
-	wl_surface_commit(background);
+	wl_surface_commit(background->surface);
 }
 
 static void nested_surface_set_buffer_transform(struct wl_client *client,
@@ -584,6 +689,30 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
 	if (fwd_surface->color_representation) {
 		wl_resource_set_user_data(fwd_surface->color_representation, NULL);
 	}
+	if (fwd_surface->subsurface) {
+		wl_resource_set_user_data(fwd_surface->subsurface, NULL);
+	}
+
+	if (fwd_surface->ext_subsurface) {
+		wl_subsurface_destroy(fwd_surface->ext_subsurface);
+		fwd_surface->ext_subsurface = NULL;
+	}
+	if (fwd_surface->ext_surface.surface) {
+		wl_surface_destroy(fwd_surface->ext_surface.surface);
+		fwd_surface->ext_surface.surface = NULL;
+	}
+	if (fwd_surface->ext_surface.viewport) {
+		wp_viewport_destroy(fwd_surface->ext_surface.viewport);
+		fwd_surface->ext_surface.viewport = NULL;
+	}
+	if (fwd_surface->ext_surface.color_surface) {
+		wp_color_management_surface_v1_destroy(fwd_surface->ext_surface.color_surface);
+		fwd_surface->ext_surface.color_surface = NULL;
+	}
+	if (fwd_surface->ext_surface.color_rep_surface) {
+		wp_color_representation_surface_v1_destroy(fwd_surface->ext_surface.color_rep_surface);
+		fwd_surface->ext_surface.color_rep_surface = NULL;
+	}
 
 	free(fwd_surface);
 }
@@ -602,6 +731,9 @@ static void default_surface_state(struct surface_state *state) {
 	state->offset_y = 0;
 	state->attachment = NULL;
 	// state->attachment_link is only used when attachment is not NULL
+
+	wl_list_init(&state->subsurfaces_above);
+	wl_list_init(&state->subsurfaces_below);
 }
 
 static void compositor_create_surface(struct wl_client *client,
@@ -621,10 +753,16 @@ static void compositor_create_surface(struct wl_client *client,
 		wl_client_post_no_memory(client);
 		return;
 	}
+	fwd_surface->surface = resource;
 	fwd_surface->state = state;
 	wl_list_init(&fwd_surface->frame_callbacks);
 	default_surface_state(&fwd_surface->pending);
 	default_surface_state(&fwd_surface->committed);
+
+	fwd_surface->subsurf_pending_entry.surface = fwd_surface;
+	fwd_surface->subsurf_committed_entry.surface = fwd_surface;
+	wl_list_init(&fwd_surface->subsurf_pending_entry.link);
+	wl_list_init(&fwd_surface->subsurf_committed_entry.link);
 
 	wl_resource_set_implementation(surf_resource, &surface_impl,
 		fwd_surface, surface_handle_resource_destroy);
@@ -676,6 +814,235 @@ void bind_wl_compositor(struct wl_client *client, void *data,
 		return;
 	}
 	wl_resource_set_implementation(resource, &compositor_impl, data, NULL);
+}
+
+
+static void nested_subsurface_destroy(struct wl_client *client, struct wl_resource *resource) {
+	// TODO: update parent surface?
+	wl_resource_destroy(resource);
+}
+static void nested_subsurface_set_position(struct wl_client *client,
+		struct wl_resource *resource, int32_t x, int32_t y) {
+	assert(wl_resource_instance_of(resource, &wl_subsurface_interface, &subsurface_impl));
+	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+	if (!fwd_surface->subsurface_parent || fwd_surface->inert) {
+		// Subsurface parent destroyed, ignore
+		return;
+	}
+
+	assert(!wl_list_empty(&fwd_surface->subsurf_pending_entry.link));
+	fwd_surface->subsurf_pending_entry.pos_x = x;
+	fwd_surface->subsurf_pending_entry.pos_y = y;
+}
+static void nested_subsurface_place_above(struct wl_client *client,
+		struct wl_resource *resource, struct wl_resource *sibling) {
+	assert(wl_resource_instance_of(resource, &wl_subsurface_interface, &subsurface_impl));
+	assert(wl_resource_instance_of(sibling, &wl_surface_interface, &surface_impl));
+	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+	struct forward_surface *sib_surface = wl_resource_get_user_data(sibling);
+	assert(fwd_surface != sib_surface);
+
+	struct forward_surface *parent = fwd_surface->subsurface_parent;
+	if (!fwd_surface->subsurface_parent || fwd_surface->inert) {
+		// Subsurface parent destroyed, ignore
+		return;
+	}
+
+	assert(!wl_list_empty(&fwd_surface->subsurf_pending_entry.link));
+	if (parent == sib_surface) {
+		wl_list_remove(&fwd_surface->subsurf_pending_entry.link);
+		wl_list_insert(&parent->pending.subsurfaces_above,
+			&fwd_surface->subsurf_pending_entry.link);
+	} else if (parent == sib_surface->subsurface_parent) {
+		wl_list_remove(&fwd_surface->subsurf_pending_entry.link);
+		wl_list_insert(&sib_surface->subsurf_pending_entry.link,
+			&fwd_surface->subsurf_pending_entry.link);
+	} else {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"surface neither sibling nor parent");
+		return;
+	}
+}
+static void nested_subsurface_place_below(struct wl_client *client,
+		struct wl_resource *resource, struct wl_resource *sibling) {
+	assert(wl_resource_instance_of(resource, &wl_subsurface_interface, &subsurface_impl));
+	assert(wl_resource_instance_of(sibling, &wl_surface_interface, &surface_impl));
+	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+	struct forward_surface *sib_surface = wl_resource_get_user_data(sibling);
+	assert(fwd_surface != sib_surface);
+
+	struct forward_surface *parent = fwd_surface->subsurface_parent;
+	if (!fwd_surface->subsurface_parent || fwd_surface->inert) {
+		// Subsurface parent destroyed, ignore
+		return;
+	}
+
+	assert(!wl_list_empty(&fwd_surface->subsurf_pending_entry.link));
+	if (parent == sib_surface) {
+		wl_list_remove(&fwd_surface->subsurf_pending_entry.link);
+		wl_list_insert_before(&parent->pending.subsurfaces_below,
+			&fwd_surface->subsurf_pending_entry.link);
+	} else if (parent == sib_surface->subsurface_parent) {
+		wl_list_remove(&fwd_surface->subsurf_pending_entry.link);
+		wl_list_insert_before(&sib_surface->subsurf_pending_entry.link,
+			&fwd_surface->subsurf_pending_entry.link);
+	} else {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"surface neither sibling nor parent");
+	}
+}
+static void nested_subsurface_set_sync(struct wl_client *client,
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_subsurface_interface, &subsurface_impl));
+	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+	if (!fwd_surface->subsurface_parent || fwd_surface->inert) {
+		// Subsurface parent destroyed, ignore
+		return;
+	}
+
+	assert(!wl_list_empty(&fwd_surface->subsurf_pending_entry.link));
+	fwd_surface->subsurf_pending_entry.is_desync = false;
+}
+static void nested_subsurface_set_desync(struct wl_client *client,
+		struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_subsurface_interface, &subsurface_impl));
+	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+	if (!fwd_surface->subsurface_parent || fwd_surface->inert) {
+		// Subsurface parent destroyed, ignore
+		return;
+	}
+
+	assert(!wl_list_empty(&fwd_surface->subsurf_pending_entry.link));
+	fwd_surface->subsurf_pending_entry.is_desync = true;
+}
+static const struct wl_subsurface_interface subsurface_impl = {
+	.destroy = nested_subsurface_destroy,
+	.set_position = nested_subsurface_set_position,
+	.place_above = nested_subsurface_place_above,
+	.place_below = nested_subsurface_place_below,
+	.set_sync = nested_subsurface_set_sync,
+	.set_desync = nested_subsurface_set_desync
+};
+
+static void subsurface_handle_resource_destroy(struct wl_resource *resource) {
+	assert(wl_resource_instance_of(resource, &wl_subsurface_interface, &subsurface_impl));
+	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+	if (!fwd_surface) {
+		return;
+	}
+	// Clean up just the subsurface-related resources
+	if (fwd_surface->ext_subsurface) {
+		wl_subsurface_destroy(fwd_surface->ext_subsurface);
+		fwd_surface->ext_subsurface = NULL;
+	}
+	if (fwd_surface->ext_surface.surface) {
+		wl_surface_destroy(fwd_surface->ext_surface.surface);
+		fwd_surface->ext_surface.surface = NULL;
+	}
+	if (fwd_surface->ext_surface.viewport) {
+		wp_viewport_destroy(fwd_surface->ext_surface.viewport);
+		fwd_surface->ext_surface.viewport = NULL;
+	}
+	if (fwd_surface->ext_surface.color_surface) {
+		wp_color_management_surface_v1_destroy(fwd_surface->ext_surface.color_surface);
+		fwd_surface->ext_surface.color_surface = NULL;
+	}
+	if (fwd_surface->ext_surface.color_rep_surface) {
+		wp_color_representation_surface_v1_destroy(fwd_surface->ext_surface.color_rep_surface);
+		fwd_surface->ext_surface.color_rep_surface = NULL;
+	}
+}
+
+static void subcompositor_destroy(struct wl_client *client, struct wl_resource *resource) {
+	wl_resource_destroy(resource);
+}
+static void subcompositor_get_subsurface(struct wl_client *client,
+		struct wl_resource *resource, uint32_t id, struct wl_resource *child,
+		struct wl_resource *parent) {
+
+	assert(wl_resource_instance_of(child, &wl_surface_interface, &surface_impl));
+	assert(wl_resource_instance_of(parent, &wl_surface_interface, &surface_impl));
+	struct forward_surface *child_surf = wl_resource_get_user_data(child);
+	struct forward_surface *parent_surf = wl_resource_get_user_data(parent);
+
+	if (child_surf->layer_surface) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+			"child surface already has a role (layer surface)");
+		return;
+	}
+
+	if (child_surf->subsurface_parent) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+			"child surface already has a subsurface");
+		return;
+	}
+
+	struct forward_surface *ancestor = parent_surf;
+	while (ancestor->subsurface_parent) {
+		ancestor = ancestor->subsurface_parent;
+	}
+
+	if (ancestor == child_surf) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
+			"parent surface descends from child");
+		return;
+	}
+
+	struct forward_state *state = child_surf->state;
+
+	struct augmented_surface ext_surface;
+
+	ext_surface.surface =
+		wl_compositor_create_surface(child_surf->state->compositor);
+
+	if (state->viewporter) {
+		ext_surface.viewport = wp_viewporter_get_viewport(state->viewporter, ext_surface.surface);
+		assert(ext_surface.viewport);
+	}
+
+	if (state->color_representation) {
+		ext_surface.color_rep_surface = wp_color_representation_manager_v1_get_surface(
+			state->color_representation, ext_surface.surface);
+		assert(ext_surface.color_rep_surface);
+	}
+
+	if (state->color_management) {
+		ext_surface.color_surface = wp_color_manager_v1_get_surface(
+			state->color_management, ext_surface.surface);
+		assert(ext_surface.color_surface);
+	}
+
+	struct wl_resource *subsurf_resource =
+			wl_resource_create(client, &wl_subsurface_interface, 1, id);
+	if (subsurf_resource == NULL) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	child_surf->subsurface = subsurf_resource;
+	child_surf->subsurface_parent = parent_surf;
+	wl_list_insert_before(&parent_surf->pending.subsurfaces_above,
+		&child_surf->subsurf_pending_entry.link);
+	child_surf->ext_surface = ext_surface;
+	// The subsurface itself will be constructed at commit time if needed
+
+	wl_resource_set_implementation(subsurf_resource, &subsurface_impl,
+		child_surf, subsurface_handle_resource_destroy);
+}
+static const struct wl_subcompositor_interface subcompositor_impl = {
+	.destroy = subcompositor_destroy,
+	.get_subsurface = subcompositor_get_subsurface,
+};
+
+void bind_wl_subcompositor(struct wl_client *client, void *data,
+					uint32_t version, uint32_t id) {
+	struct wl_resource *resource =
+			wl_resource_create(client, &wl_subcompositor_interface, version, id);
+	if (resource == NULL) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+	wl_resource_set_implementation(resource, &subcompositor_impl, data, NULL);
 }
 
 

@@ -179,14 +179,14 @@ static void destroy_surface(struct swaylock_surface *surface) {
 	if (surface->fractional_scale) {
 		wp_fractional_scale_v1_destroy(surface->fractional_scale);
 	}
-	if (surface->color_rep_surface) {
-		wp_color_representation_surface_v1_destroy(surface->color_rep_surface);
+	if (surface->surface.color_rep_surface) {
+		wp_color_representation_surface_v1_destroy(surface->surface.color_rep_surface);
 	}
-	if (surface->color_surface) {
-		wp_color_management_surface_v1_destroy(surface->color_surface);
+	if (surface->surface.color_surface) {
+		wp_color_management_surface_v1_destroy(surface->surface.color_surface);
 	}
-	if (surface->viewport) {
-		wp_viewport_destroy(surface->viewport);
+	if (surface->surface.viewport) {
+		wp_viewport_destroy(surface->surface.viewport);
 	}
 	if (surface->subsurface) {
 		wl_subsurface_destroy(surface->subsurface);
@@ -194,8 +194,8 @@ static void destroy_surface(struct swaylock_surface *surface) {
 	if (surface->child) {
 		wl_surface_destroy(surface->child);
 	}
-	if (surface->surface != NULL) {
-		wl_surface_destroy(surface->surface);
+	if (surface->surface.surface) {
+		wl_surface_destroy(surface->surface.surface);
 	}
 	destroy_buffer(&surface->indicator_buffers[0]);
 	destroy_buffer(&surface->indicator_buffers[1]);
@@ -240,17 +240,18 @@ static void create_surface(struct swaylock_surface *surface) {
 
 	surface->image = select_image(state, surface);
 
-	surface->surface = wl_compositor_create_surface(state->compositor);
-	assert(surface->surface);
+	surface->surface.surface = wl_compositor_create_surface(state->compositor);
+	assert(surface->surface.surface);
 
 	surface->child = wl_compositor_create_surface(state->compositor);
 	assert(surface->child);
-	surface->subsurface = wl_subcompositor_get_subsurface(state->subcompositor, surface->child, surface->surface);
+	surface->subsurface = wl_subcompositor_get_subsurface(state->subcompositor,
+		surface->child, surface->surface.surface);
 	assert(surface->subsurface);
 	wl_subsurface_set_sync(surface->subsurface);
 
 	surface->ext_session_lock_surface_v1 = ext_session_lock_v1_get_lock_surface(
-			state->ext_session_lock_v1, surface->surface, surface->output);
+			state->ext_session_lock_v1, surface->surface.surface, surface->output);
 	ext_session_lock_surface_v1_add_listener(surface->ext_session_lock_surface_v1,
 			&ext_session_lock_surface_v1_listener, surface);
 
@@ -260,32 +261,32 @@ static void create_surface(struct swaylock_surface *surface) {
 		struct wl_region *region =
 			wl_compositor_create_region(surface->state->compositor);
 		wl_region_add(region, 0, 0, INT32_MAX, INT32_MAX);
-		wl_surface_set_opaque_region(surface->surface, region);
+		wl_surface_set_opaque_region(surface->surface.surface, region);
 		wl_region_destroy(region);
 	}
 
 	if (state->forward.fractional_scale) {
 		surface->fractional_scale = wp_fractional_scale_manager_v1_get_fractional_scale(
-			state->forward.fractional_scale, surface->surface);
+			state->forward.fractional_scale, surface->surface.surface);
 		wp_fractional_scale_v1_add_listener(surface->fractional_scale, &fract_scale_listener, surface);
 		assert(surface->fractional_scale);
 	}
 
 	if (state->forward.viewporter) {
-		surface->viewport = wp_viewporter_get_viewport(state->forward.viewporter, surface->surface);
-		assert(surface->viewport);
+		surface->surface.viewport = wp_viewporter_get_viewport(state->forward.viewporter, surface->surface.surface);
+		assert(surface->surface.viewport);
 	}
 
 	if (state->forward.color_representation) {
-		surface->color_rep_surface = wp_color_representation_manager_v1_get_surface(
-			state->forward.color_representation, surface->surface);
-		assert(surface->color_rep_surface);
+		surface->surface.color_rep_surface = wp_color_representation_manager_v1_get_surface(
+			state->forward.color_representation, surface->surface.surface);
+		assert(surface->surface.color_rep_surface);
 	}
 
 	if (state->forward.color_management) {
-		surface->color_surface = wp_color_manager_v1_get_surface(
-			state->forward.color_management, surface->surface);
-		assert(surface->color_surface);
+		surface->surface.color_surface = wp_color_manager_v1_get_surface(
+			state->forward.color_management, surface->surface.surface);
+		assert(surface->surface.color_surface);
 		// TODO: also eagerly create a wp_color_management_surface_feedback_v1
 		// in case a plugin client later requests surface feedback, and having
 		// the specific output already known improves the feedback hint. This
@@ -532,6 +533,7 @@ static void handle_global(void *data, struct wl_registry *registry,
 	} else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
 		state->subcompositor = wl_registry_bind(registry, name,
 				&wl_subcompositor_interface, 1);
+		state->forward.subcompositor = state->subcompositor;
 	} else if (strcmp(interface, wl_shm_interface.name) == 0) {
 		state->shm = wl_registry_bind(registry, name,
 				&wl_shm_interface, 1);
@@ -1786,10 +1788,10 @@ static void render_fallback_surface(struct swaylock_surface *surface) {
 	cairo_set_operator(buffer.cairo, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cairo);
 
-	wl_surface_set_buffer_scale(surface->surface, 1);
-	wl_surface_attach(surface->surface, buffer.buffer, 0, 0);
-	wl_surface_damage_buffer(surface->surface, 0, 0, INT32_MAX, INT32_MAX);
-	wl_surface_commit(surface->surface);
+	wl_surface_set_buffer_scale(surface->surface.surface, 1);
+	wl_surface_attach(surface->surface.surface, buffer.buffer, 0, 0);
+	wl_surface_damage_buffer(surface->surface.surface, 0, 0, INT32_MAX, INT32_MAX);
+	wl_surface_commit(surface->surface.surface);
 	destroy_buffer(&buffer);
 
 	surface->has_buffer = true;
@@ -2493,6 +2495,8 @@ int main(int argc, char **argv) {
 	// Also TODO: forwarding linux-dmabuf and (only the device part) of wl-drm
 	state.server.compositor = wl_global_create(state.server.display,
 		&wl_compositor_interface, 4, &state.forward, bind_wl_compositor);
+	state.server.subcompositor = wl_global_create(state.server.display,
+		&wl_subcompositor_interface, 1, &state.forward, bind_wl_subcompositor);
 	state.server.shm = wl_global_create(state.server.display,
 		&wl_shm_interface, 1, &state.forward, bind_wl_shm);
 	if (state.forward.drm) {
