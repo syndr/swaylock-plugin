@@ -990,7 +990,7 @@ static void subcompositor_get_subsurface(struct wl_client *client,
 
 	struct forward_state *state = child_surf->state;
 
-	struct augmented_surface ext_surface;
+	struct augmented_surface ext_surface = {0};
 
 	ext_surface.surface =
 		wl_compositor_create_surface(child_surf->state->compositor);
