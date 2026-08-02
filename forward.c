@@ -637,6 +637,42 @@ static const struct wl_surface_interface surface_impl = {
 	.damage_buffer = nested_surface_damage_buffer,
 };
 
+static void destroy_subsurface_parts(struct forward_surface *fwd_surface) {
+	if (fwd_surface->ext_subsurface) {
+		wl_subsurface_destroy(fwd_surface->ext_subsurface);
+		fwd_surface->ext_subsurface = NULL;
+	}
+	if (fwd_surface->ext_surface.surface) {
+		wl_surface_destroy(fwd_surface->ext_surface.surface);
+		fwd_surface->ext_surface.surface = NULL;
+	}
+	if (fwd_surface->ext_surface.viewport) {
+		wp_viewport_destroy(fwd_surface->ext_surface.viewport);
+		fwd_surface->ext_surface.viewport = NULL;
+	}
+	if (fwd_surface->ext_surface.color_surface) {
+		wp_color_management_surface_v1_destroy(fwd_surface->ext_surface.color_surface);
+		fwd_surface->ext_surface.color_surface = NULL;
+	}
+	if (fwd_surface->ext_surface.color_rep_surface) {
+		wp_color_representation_surface_v1_destroy(fwd_surface->ext_surface.color_rep_surface);
+		fwd_surface->ext_surface.color_rep_surface = NULL;
+	}
+
+	if (!wl_list_empty(&fwd_surface->subsurf_pending_entry.link)) {
+		wl_list_remove(&fwd_surface->subsurf_pending_entry.link);
+		wl_list_init(&fwd_surface->subsurf_pending_entry.link);
+	}
+
+	if (!wl_list_empty(&fwd_surface->subsurf_committed_entry.link)) {
+		wl_list_remove(&fwd_surface->subsurf_committed_entry.link);
+		wl_list_init(&fwd_surface->subsurf_committed_entry.link);
+	}
+
+	fwd_surface->subsurface_parent = NULL;
+	fwd_surface->inert = true;
+}
+
 static void surface_handle_resource_destroy(struct wl_resource *resource) {
 	assert(wl_resource_instance_of(resource, &wl_surface_interface, &surface_impl));
 	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
@@ -693,26 +729,7 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
 		wl_resource_set_user_data(fwd_surface->subsurface, NULL);
 	}
 
-	if (fwd_surface->ext_subsurface) {
-		wl_subsurface_destroy(fwd_surface->ext_subsurface);
-		fwd_surface->ext_subsurface = NULL;
-	}
-	if (fwd_surface->ext_surface.surface) {
-		wl_surface_destroy(fwd_surface->ext_surface.surface);
-		fwd_surface->ext_surface.surface = NULL;
-	}
-	if (fwd_surface->ext_surface.viewport) {
-		wp_viewport_destroy(fwd_surface->ext_surface.viewport);
-		fwd_surface->ext_surface.viewport = NULL;
-	}
-	if (fwd_surface->ext_surface.color_surface) {
-		wp_color_management_surface_v1_destroy(fwd_surface->ext_surface.color_surface);
-		fwd_surface->ext_surface.color_surface = NULL;
-	}
-	if (fwd_surface->ext_surface.color_rep_surface) {
-		wp_color_representation_surface_v1_destroy(fwd_surface->ext_surface.color_rep_surface);
-		fwd_surface->ext_surface.color_rep_surface = NULL;
-	}
+	destroy_subsurface_parts(fwd_surface);
 
 	free(fwd_surface);
 }
@@ -930,27 +947,8 @@ static void subsurface_handle_resource_destroy(struct wl_resource *resource) {
 	if (!fwd_surface) {
 		return;
 	}
-	// Clean up just the subsurface-related resources
-	if (fwd_surface->ext_subsurface) {
-		wl_subsurface_destroy(fwd_surface->ext_subsurface);
-		fwd_surface->ext_subsurface = NULL;
-	}
-	if (fwd_surface->ext_surface.surface) {
-		wl_surface_destroy(fwd_surface->ext_surface.surface);
-		fwd_surface->ext_surface.surface = NULL;
-	}
-	if (fwd_surface->ext_surface.viewport) {
-		wp_viewport_destroy(fwd_surface->ext_surface.viewport);
-		fwd_surface->ext_surface.viewport = NULL;
-	}
-	if (fwd_surface->ext_surface.color_surface) {
-		wp_color_management_surface_v1_destroy(fwd_surface->ext_surface.color_surface);
-		fwd_surface->ext_surface.color_surface = NULL;
-	}
-	if (fwd_surface->ext_surface.color_rep_surface) {
-		wp_color_representation_surface_v1_destroy(fwd_surface->ext_surface.color_rep_surface);
-		fwd_surface->ext_surface.color_rep_surface = NULL;
-	}
+
+	destroy_subsurface_parts(fwd_surface);
 }
 
 static void subcompositor_destroy(struct wl_client *client, struct wl_resource *resource) {
