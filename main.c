@@ -2424,6 +2424,7 @@ int main(int argc, char **argv) {
 	state.forward.upstream_display = state.display;
 	state.forward.upstream_registry = registry;
 	wl_list_init(&state.forward.feedback_instances);
+	wl_list_init(&state.forward.shm_pools);
 	wl_list_init(&state.stale_wl_output_resources);
 	wl_list_init(&state.stale_xdg_output_resources);
 	wl_list_init(&state.server.clients);
