@@ -105,7 +105,7 @@ jobs:
           ls -l debs
           echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.collect.outputs.artifact }}
           path: debs/*.deb
@@ -190,7 +190,7 @@ jobs:
           ls -l debs
           echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.collect.outputs.artifact }}
           path: debs/*.deb
@@ -204,7 +204,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: debs
           pattern: debs-*
