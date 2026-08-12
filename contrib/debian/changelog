@@ -1,3 +1,11 @@
+swaylock-plugin (1.8.7.1-1) unstable; urgency=medium
+
+  * Merge upstream v1.8.7: fix reversed dup2 arguments in daemonize, fix
+    stray character in password buffer after suspend/resume cycle, and add
+    partial support for subsurfaces.
+
+ -- syndr <syndr@ultroncore.net>  Wed, 12 Aug 2026 00:00:00 +0000
+
 swaylock-plugin (1.8.6.3-1) unstable; urgency=medium
 
   * Share upstream shm pools between nested pools backed by the same file,

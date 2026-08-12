@@ -1,4 +1,4 @@
-%{!?pkg_version:%global pkg_version 1.8.6.3}
+%{!?pkg_version:%global pkg_version 1.8.7.1}
 
 Name:           swaylock-plugin
 Version:        %{pkg_version}
@@ -86,6 +86,11 @@ install -Dpm0755 contrib/screensaver/swaylock-screensaver-shots \
 %{_bindir}/swaylock-screensaver-shots
 
 %changelog
+* Wed Aug 12 2026 syndr <syndr@ultroncore.net> - 1.8.7.1-1
+- Merge upstream v1.8.7: fix reversed dup2 arguments in daemonize, fix stray
+  character in password buffer after suspend/resume cycle, add partial
+  support for subsurfaces
+
 * Wed Aug 12 2026 syndr <syndr@ultroncore.net> - 1.8.6.3-1
 - Share upstream shm pools between nested pools backed by the same file,
   cutting upstream fd usage with animating plugin backgrounds (#8)
