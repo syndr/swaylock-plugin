@@ -98,7 +98,11 @@ jobs:
           suffix="${ID}${VERSION_ID}"
           artifact="debs-$(echo '${{ matrix.image }}' | tr ':.' '--')"
           mkdir -p debs
+          # Skip dh_strip's automatic -dbgsym package: Debian emits it as a
+          # .deb (Ubuntu uses .ddeb, which the glob never matched), and we
+          # don't ship debug symbols in the release assets.
           for deb in ../swaylock-plugin*_*.deb; do
+            case "${deb}" in *-dbgsym_*) continue ;; esac
             base="$(basename "${deb}" .deb)"
             cp "${deb}" "debs/${base}.${suffix}.deb"
           done
