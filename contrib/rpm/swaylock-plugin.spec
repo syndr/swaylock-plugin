@@ -1,4 +1,4 @@
-%{!?pkg_version:%global pkg_version 1.8.6.2}
+%{!?pkg_version:%global pkg_version 1.8.6.3}
 
 Name:           swaylock-plugin
 Version:        %{pkg_version}
@@ -86,6 +86,10 @@ install -Dpm0755 contrib/screensaver/swaylock-screensaver-shots \
 %{_bindir}/swaylock-screensaver-shots
 
 %changelog
+* Wed Aug 12 2026 syndr <syndr@ultroncore.net> - 1.8.6.3-1
+- Share upstream shm pools between nested pools backed by the same file,
+  cutting upstream fd usage with animating plugin backgrounds (#8)
+
 * Mon Jul 06 2026 syndr <syndr@ultroncore.net> - 1.8.6.2-1
 - Add the swaylock-plugin-screensaver subpackage: xscreensaver hack lock
   launcher, rofi picker with thumbnails/descriptions, and local thumbnail

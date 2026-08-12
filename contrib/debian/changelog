@@ -1,3 +1,10 @@
+swaylock-plugin (1.8.6.3-1) unstable; urgency=medium
+
+  * Share upstream shm pools between nested pools backed by the same file,
+    cutting upstream fd usage with animating plugin backgrounds (#8).
+
+ -- syndr <syndr@ultroncore.net>  Wed, 12 Aug 2026 00:00:00 +0000
+
 swaylock-plugin (1.8.6.2-1) unstable; urgency=medium
 
   * New binary package swaylock-plugin-screensaver: xscreensaver hack lock
