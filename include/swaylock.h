@@ -174,6 +174,31 @@ struct image_description_state {
 	struct swaylock_state *state;
 };
 
+/* An upstream wl_shm_pool, shared by every nested pool backed by the same file.
+ *
+ * Nested clients routinely create many pools over one backing file -- an
+ * animating Xwayland background can do so dozens of times -- and each
+ * wl_shm_create_pool passes a fresh fd to the compositor. Forwarding them
+ * one-to-one costs an upstream fd per repeat for no benefit: the pools describe
+ * identical memory. Keyed on (dev, ino) so it holds no matter which nested
+ * client is responsible for the churn.
+ *
+ * The identity cannot go stale while an entry lives: the compositor holds an fd
+ * on the pool, so the file cannot be unlinked and a new one created onto the
+ * same inode underneath us.
+ */
+struct forwarded_shm_pool {
+	struct wl_list link;
+	dev_t dev;
+	ino_t ino;
+	struct wl_shm_pool *pool;
+	/* the largest size any referencing nested pool asked for; the upstream pool
+	 * is grown to match and never shrunk, since other referents may still be
+	 * addressing the tail */
+	int32_t size;
+	int refcount;
+};
+
 // todo: merge with swaylock_bg_server ?
 struct forward_state {
 	/* these pointers are copies of those in swaylock_state */
@@ -187,6 +212,8 @@ struct forward_state {
 	/* list of wl_resources corresponding to (default/surface) feedback instances
 	 * that should get updated when the upstream feedback is updated */
 	struct wl_list feedback_instances;
+	/* forwarded_shm_pool.link -- upstream pools shared by backing file */
+	struct wl_list shm_pools;
 	/* We only let the background generator create surfaces, but not
 	 * subsurfaces, because those are much trickier to implement correctly,
 	 * and a well designed background shouldn't need them anyway. */

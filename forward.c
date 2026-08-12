@@ -9,6 +9,7 @@
 #include <wayland-server-protocol.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <sys/stat.h>
 
 #include "color-management-v1-server-protocol.h"
 #include "color-representation-v1-server-protocol.h"
@@ -721,7 +722,8 @@ static void nested_shm_pool_create_buffer(struct wl_client *client,
 		int32_t offset, int32_t width, int32_t height,
 		int32_t stride, uint32_t format) {
 	assert(wl_resource_instance_of(resource, &wl_shm_pool_interface, &shm_pool_impl));
-	struct wl_shm_pool *shm_pool = wl_resource_get_user_data(resource);
+	struct forwarded_shm_pool *entry = wl_resource_get_user_data(resource);
+	struct wl_shm_pool *shm_pool = entry->pool;
 
 	struct wl_resource *buf_resource = wl_resource_create(client, &wl_buffer_interface,
 		wl_resource_get_version(resource), id);
@@ -759,8 +761,14 @@ static void nested_shm_pool_destroy(struct wl_client *client,
 static void nested_shm_pool_resize(struct wl_client *client,
 		struct wl_resource *resource, int32_t size) {
 	assert(wl_resource_instance_of(resource, &wl_shm_pool_interface, &shm_pool_impl));
-	struct wl_shm_pool* shm_pool = wl_resource_get_user_data(resource);
-	wl_shm_pool_resize(shm_pool, size);
+	struct forwarded_shm_pool *entry = wl_resource_get_user_data(resource);
+	/* The upstream pool is shared, so it tracks the high-water mark of every
+	 * referent. wl_shm_pool.resize may only grow, and shrinking to satisfy one
+	 * nested pool would invalidate buffers another still addresses. */
+	if (size > entry->size) {
+		wl_shm_pool_resize(entry->pool, size);
+		entry->size = size;
+	}
 }
 
 static const struct wl_shm_pool_interface shm_pool_impl = {
@@ -771,8 +779,14 @@ static const struct wl_shm_pool_interface shm_pool_impl = {
 
 static void shm_pool_handle_resource_destroy(struct wl_resource *resource) {
 	assert(wl_resource_instance_of(resource, &wl_shm_pool_interface, &shm_pool_impl));
-	struct wl_shm_pool* shm_pool = wl_resource_get_user_data(resource);
-	wl_shm_pool_destroy(shm_pool);
+	struct forwarded_shm_pool *entry = wl_resource_get_user_data(resource);
+	/* The upstream pool outlives any single nested pool that shares it. */
+	if (--entry->refcount > 0) {
+		return;
+	}
+	wl_shm_pool_destroy(entry->pool);
+	wl_list_remove(&entry->link);
+	free(entry);
 }
 static void shm_create_pool(struct wl_client *client, struct wl_resource *resource,
 		uint32_t id, int32_t fd, int32_t size) {
@@ -786,11 +800,54 @@ static void shm_create_pool(struct wl_client *client, struct wl_resource *resour
 
 	struct forward_state *server = wl_resource_get_user_data(resource);
 	struct wl_shm *shm = server->shm;
-	struct wl_shm_pool *shm_pool = wl_shm_create_pool(shm, fd, size);
+
+	/* Reuse the upstream pool if this file has already been forwarded. Every
+	 * wl_shm_create_pool hands the compositor another fd, and nested clients
+	 * recreate pools over the same file constantly, so forwarding each one
+	 * spends fds on duplicates of memory the compositor already has mapped. */
+	struct stat st;
+	bool have_identity = fstat(fd, &st) == 0;
+	if (have_identity) {
+		struct forwarded_shm_pool *entry;
+		wl_list_for_each(entry, &server->shm_pools, link) {
+			if (entry->dev != st.st_dev || entry->ino != st.st_ino) {
+				continue;
+			}
+			if (size > entry->size) {
+				wl_shm_pool_resize(entry->pool, size);
+				entry->size = size;
+			}
+			entry->refcount++;
+			close(fd);
+			wl_resource_set_implementation(pool_resource, &shm_pool_impl,
+				entry, shm_pool_handle_resource_destroy);
+			return;
+		}
+	}
+
+	struct forwarded_shm_pool *entry = calloc(1, sizeof(struct forwarded_shm_pool));
+	if (!entry) {
+		close(fd);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	entry->pool = wl_shm_create_pool(shm, fd, size);
 	close(fd);
+	entry->size = size;
+	entry->refcount = 1;
+	if (have_identity) {
+		entry->dev = st.st_dev;
+		entry->ino = st.st_ino;
+		wl_list_insert(&server->shm_pools, &entry->link);
+	} else {
+		/* Unidentifiable: keep it unshared rather than failing the lock. The
+		 * list link must still be valid for wl_list_remove on teardown. */
+		wl_list_init(&entry->link);
+	}
 
 	wl_resource_set_implementation(pool_resource, &shm_pool_impl,
-		shm_pool, shm_pool_handle_resource_destroy);
+		entry, shm_pool_handle_resource_destroy);
 }
 
 static const struct wl_shm_interface shm_impl = {
