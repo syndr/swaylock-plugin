@@ -98,14 +98,18 @@ jobs:
           suffix="${ID}${VERSION_ID}"
           artifact="debs-$(echo '${{ matrix.image }}' | tr ':.' '--')"
           mkdir -p debs
+          # Skip dh_strip's automatic -dbgsym package: Debian emits it as a
+          # .deb (Ubuntu uses .ddeb, which the glob never matched), and we
+          # don't ship debug symbols in the release assets.
           for deb in ../swaylock-plugin*_*.deb; do
+            case "${deb}" in *-dbgsym_*) continue ;; esac
             base="$(basename "${deb}" .deb)"
             cp "${deb}" "debs/${base}.${suffix}.deb"
           done
           ls -l debs
           echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.collect.outputs.artifact }}
           path: debs/*.deb
@@ -190,7 +194,7 @@ jobs:
           ls -l debs
           echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.collect.outputs.artifact }}
           path: debs/*.deb
@@ -204,7 +208,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: debs
           pattern: debs-*
