@@ -4,7 +4,7 @@ swaylock-plugin (1.8.7.1-1) unstable; urgency=medium
     stray character in password buffer after suspend/resume cycle, and add
     partial support for subsurfaces.
 
- -- syndr <syndr@ultroncore.net>  Wed, 12 Aug 2026 00:00:00 +0000
+ -- syndr <syndr@ultroncore.net>  Wed, 12 Aug 2026 07:53:30 +0000
 
 swaylock-plugin (1.8.6.3-1) unstable; urgency=medium
 
