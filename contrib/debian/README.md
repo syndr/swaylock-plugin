@@ -13,12 +13,19 @@ packages from one source:
 
 There is no PPA or external build service. GitHub is the distribution
 endpoint: `.github/workflows/deb.yml` builds the package inside Debian and
-Ubuntu containers and, on release (called from `release.yml` right after the
-version tag is pushed), attaches the `.deb` files to the GitHub Release with
-a distro suffix in the file name, e.g.
-`swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb`. On pull requests the same
-workflow uploads the `.deb`s as CI artifacts and gates on `lintian
+Ubuntu containers, on `amd64` (standard runners) and `arm64` (GitHub's
+`ubuntu-24.04-arm` runners, free for public repositories) and, on release
+(called from `release.yml` right after the version tag is pushed), attaches
+the `.deb` files to the GitHub Release with a distro suffix in the file name,
+e.g. `swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb`. On pull requests the
+same workflow uploads the `.deb`s as CI artifacts and gates on `lintian
 --fail-on error`.
+
+The `arm64` matrix leg builds with `dpkg-buildpackage -B` (arch-dependent
+binaries only). `swaylock-plugin-screensaver` is `Architecture: all` and is
+therefore built once, on `amd64`; building it on both would produce two
+identically-named `_all` `.deb`s that collide when the release job merges the
+artifacts.
 
 ## Building locally
 

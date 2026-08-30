@@ -3,12 +3,14 @@ name: Debian packages
 # GitHub Releases are the distribution endpoint for Debian/Ubuntu users — no
 # PPA/OBS. This workflow builds swaylock-plugin .debs (from contrib/debian/)
 # and windowtolayer .debs (from contrib/debian-windowtolayer/, tracking the
-# latest upstream tag like the COPR package) inside Debian/Ubuntu containers.
+# latest upstream tag like the COPR package) inside Debian/Ubuntu containers,
+# for both amd64 and arm64.
 # On pull requests the packages are uploaded as CI artifacts and gated on
 # `lintian --fail-on error`; when called from release.yml with a release tag,
 # the .debs are also attached to that tag's GitHub Release (created on the
 # fly if it does not exist) with a distro-suffixed file name, e.g.
-# swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb.
+# swaylock-plugin_1.8.6.1-1_amd64.ubuntu24.04.deb and
+# swaylock-plugin_1.8.6.1-1_arm64.ubuntu24.04.deb.
 #
 # There is deliberately no `on: push: tags:` trigger: release.yml pushes the
 # tag with GITHUB_TOKEN, which does not re-trigger GitHub Actions — hence the
@@ -31,11 +33,20 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # amd64 on the standard runners, arm64 on GitHub's arm64 runners (free for
+    # public repositories). The container image is independent of the runner's
+    # architecture, so every image is built on both.
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         image: ['debian:stable', 'ubuntu:24.04', 'ubuntu:latest']
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     container: ${{ matrix.image }}
     defaults:
       run:
@@ -83,7 +94,16 @@ jobs:
             debian/control
 
       - name: Build package
-        run: dpkg-buildpackage -us -uc -b
+        # -B (arch-dependent only) on arm64: swaylock-plugin-screensaver is
+        # Architecture: all, so building it on both arches would produce two
+        # identically-named `_all` .debs that collide when the release job
+        # merges artifacts. Build it once, on amd64.
+        run: |
+          if [ '${{ matrix.arch }}' = 'amd64' ]; then
+            dpkg-buildpackage -us -uc -b
+          else
+            dpkg-buildpackage -us -uc -B
+          fi
 
       - name: Lintian (errors fail the build)
         # swaylock-plugin*_ matches both binary packages (swaylock-plugin and
@@ -96,7 +116,7 @@ jobs:
           set -euo pipefail
           . /etc/os-release
           suffix="${ID}${VERSION_ID}"
-          artifact="debs-$(echo '${{ matrix.image }}' | tr ':.' '--')"
+          artifact="debs-$(echo '${{ matrix.image }}' | tr ':.' '--')-${{ matrix.arch }}"
           mkdir -p debs
           # Skip dh_strip's automatic -dbgsym package: Debian emits it as a
           # .deb (Ubuntu uses .ddeb, which the glob never matched), and we
@@ -116,11 +136,19 @@ jobs:
           if-no-files-found: error
 
   build-windowtolayer:
-    runs-on: ubuntu-latest
+    # Same amd64 + arm64 split as the build job above. windowtolayer ships a
+    # single Architecture: any package, so both arches build normally.
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         image: ['debian:stable', 'ubuntu:24.04', 'ubuntu:latest']
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     container: ${{ matrix.image }}
     defaults:
       run:
@@ -185,7 +213,7 @@ jobs:
           set -euo pipefail
           . /etc/os-release
           suffix="${ID}${VERSION_ID}"
-          artifact="debs-windowtolayer-$(echo '${{ matrix.image }}' | tr ':.' '--')"
+          artifact="debs-windowtolayer-$(echo '${{ matrix.image }}' | tr ':.' '--')-${{ matrix.arch }}"
           mkdir -p debs
           for deb in wtl/windowtolayer_*.deb; do
             base="$(basename "${deb}" .deb)"
