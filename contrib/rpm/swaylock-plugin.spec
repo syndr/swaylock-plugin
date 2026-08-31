@@ -1,4 +1,4 @@
-%{!?pkg_version:%global pkg_version 1.8.7.1}
+%{!?pkg_version:%global pkg_version 1.8.7.2}
 
 Name:           swaylock-plugin
 Version:        %{pkg_version}
@@ -86,6 +86,9 @@ install -Dpm0755 contrib/screensaver/swaylock-screensaver-shots \
 %{_bindir}/swaylock-screensaver-shots
 
 %changelog
+* Sat Aug 29 2026 syndr <syndr@ultroncore.net> - 1.8.7.2-1
+- Build arm64 .debs alongside amd64 in deb.yml (no RPM-side change)
+
 * Wed Aug 12 2026 syndr <syndr@ultroncore.net> - 1.8.7.1-1
 - Merge upstream v1.8.7: fix reversed dup2 arguments in daemonize, fix stray
   character in password buffer after suspend/resume cycle, add partial
