@@ -128,6 +128,24 @@ layer the packages instead:
 See [`contrib/rpm/README.md`](contrib/rpm/README.md) for packaging details and
 the release process.
 
+### Pausing the background while the screen is off
+
+`swaylock-plugin` forwards the background program's buffers straight through and
+has no notion of whether an output is actually on screen, so a program that
+renders on its own clock keeps working against a blanked display. With an X11
+program running through `windowtolayer` this is not just wasted frames: Xwayland
+and the X client behind it are not throttled by frame callbacks, so they keep
+consuming CPU and GPU for as long as the screen stays off — which on a laptop or
+handheld is real battery drain.
+
+    swaylock-plugin --pause-when-hidden --command-each 'windowtolayer ...'
+
+The background program's process group is stopped when the compositor stops
+presenting its outputs, and continued when presentation resumes. No compositor
+integration is needed: a compositor that is not drawing an output stops
+completing frame callbacks for it, and that is the signal. Tune the threshold
+with `--pause-when-hidden-delay <ms>` (default 5000).
+
 ### From GitHub Releases (Debian/Ubuntu)
 
 Prebuilt `.deb` packages for Debian stable and recent Ubuntu, on `amd64` and

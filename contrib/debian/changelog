@@ -1,3 +1,11 @@
+swaylock-plugin (1.8.7.3-1) unstable; urgency=medium
+
+  * New --pause-when-hidden / --pause-when-hidden-delay: SIGSTOP the background
+    program's process group while none of its outputs are being drawn, using
+    stalled frame callbacks as the signal. Off by default.
+
+ -- syndr <syndr@ultroncore.net>  Wed, 02 Sep 2026 00:00:00 +0000
+
 swaylock-plugin (1.8.7.2-1) unstable; urgency=medium
 
   * Build arm64 .debs alongside amd64 in deb.yml, using GitHub's
