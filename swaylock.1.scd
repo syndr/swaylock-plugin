@@ -27,6 +27,30 @@ Locks your Wayland session.
 	the values of the compositor's _wl_output::name_ and _wl_output::description_
 	for the instance's output.
 
+*--pause-when-hidden*
+	Send SIGSTOP to the background program while none of its outputs are being
+	drawn, and SIGCONT when drawing resumes. Compositors stop completing frame
+	callbacks for an output they are not presenting, such as a display that has
+	been powered off after an idle timeout, and swaylock-plugin uses that as the
+	signal.
+
+	Without this, a background program that renders on its own clock keeps
+	working against a screen nobody can see. That matters most for programs
+	hosting an X11 client through *windowtolayer*: the Xwayland server and the
+	X program behind it are not throttled by frame callbacks and will keep
+	consuming CPU and GPU for as long as the display stays off.
+
+	The whole process group is signalled, so a program that spawns helpers is
+	stopped along with them. Programs that draw once and then wait, such as
+	*swaybg*, hold no outstanding frame callback and are never paused; they cost
+	nothing either way. With *--command*, a client spanning several outputs is
+	paused only when all of its outputs are undrawn.
+
+*--pause-when-hidden-delay* <milliseconds>
+	How long an output must go undrawn before *--pause-when-hidden* pauses the
+	program. Defaults to 5000, comfortably longer than a frame interval so that
+	ordinary scheduling jitter is never mistaken for a blanked display.
+
 *-C, --config* <path>
 	The config file to use. By default, the following paths are checked:
 	_$HOME/.swaylock/config_, _$XDG\_CONFIG\_HOME/swaylock/config_, and
