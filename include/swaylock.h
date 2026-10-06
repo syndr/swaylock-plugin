@@ -78,6 +78,12 @@ struct swaylock_args {
 	bool indicator_idle_visible;
 	char *plugin_command;
 	bool plugin_per_output;
+	/* Stop the plugin client while its outputs are not being presented.
+	 * See "pause-when-hidden" in main.c. */
+	bool pause_when_hidden;
+	/* How long an upstream frame callback must stay outstanding before the
+	 * output counts as not presented; unit: milliseconds. */
+	int hidden_timeout_ms;
 	/* negative values = no grace; unit: seconds */
 	float grace_time;
 	/* max number of pixels/sec mouse motion which will be ignored */
@@ -100,6 +106,14 @@ struct swaylock_bg_client {
 	/* If NULL, this client applies to all outputs; otherwise, to the
 	 * specific output indicated. */
 	struct swaylock_surface *unique_output;
+
+	/* Process group leader of the plugin command. It is spawned with
+	 * posix_spawn's setsid flag, so the whole tree -- shell, wallpaper
+	 * program, any Xwayland it hosts -- shares this as its process group,
+	 * and signalling the group reaches all of it without touching swaylock. */
+	pid_t pid;
+	/* True while the process group is SIGSTOPped by --pause-when-hidden. */
+	bool paused;
 
 	bool made_a_registry; // did client even create the wl_registry resource?
 	/* Timer after which to give up on a non-connecting client. It is
@@ -437,6 +451,10 @@ struct augmented_surface {
 /* A list of wl_surface frame callbacks to trigger when a parent callback completes */
 struct frame_callbacks {
 	struct wl_list list;
+	/* Output whose presentation these callbacks track, so completing them
+	 * can clear the stall record. NULL for surfaces with no output (e.g.
+	 * subsurfaces). */
+	struct swaylock_surface *sway_surface;
 };
 
 /* this is a resource associated to a downstream wl_surface */
@@ -503,6 +521,7 @@ struct swaylock_state {
 	struct loop_timer *input_idle_timer; // timer to reset input state to IDLE
 	struct loop_timer *auth_idle_timer; // timer to stop displaying AUTH_STATE_INVALID
 	struct loop_timer *clear_password_timer;  // clears the password buffer
+	struct loop_timer *hidden_check_timer; // re-armed poll for --pause-when-hidden
 	struct wl_display *display;
 	struct wl_compositor *compositor;
 	struct wl_subcompositor *subcompositor;
@@ -545,6 +564,14 @@ struct swaylock_surface {
 	struct wl_subsurface *subsurface;
 
 	struct forward_surface *plugin_surface;
+
+	/* Presentation tracking for --pause-when-hidden. A compositor stops
+	 * completing frame callbacks for an output it is not presenting (a
+	 * DPMS-off display, say), so an upstream callback that stays outstanding
+	 * is the signal that this output is dark. */
+	bool frame_pending;
+	struct timespec frame_pending_since;
+	struct timespec frame_last_done;
 
 	struct ext_session_lock_surface_v1 *ext_session_lock_surface_v1;
 	struct wp_fractional_scale_v1* fractional_scale;

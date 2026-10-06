@@ -41,6 +41,11 @@
 
 #define TIMEOUT_CONNECT 2500
 #define TIMEOUT_SURFACE 4000
+/* How often to re-evaluate whether a plugin client's outputs are presented. */
+#define HIDDEN_CHECK_INTERVAL 1000
+/* Default for --pause-when-hidden: comfortably more than a frame interval, so
+ * ordinary jitter is never mistaken for a dark output. */
+#define HIDDEN_TIMEOUT_DEFAULT 5000
 
 static void bind_wl_output(struct wl_client *client, void *data,
 		uint32_t version, uint32_t id);
@@ -50,6 +55,7 @@ static bool run_plugin_command(struct swaylock_state *state,
 	struct swaylock_surface *output, const char *context);
 static void setup_clientless_mode(struct swaylock_state *state);
 static void cleanup_client(struct swaylock_bg_client *bg_client);
+static void resume_all_clients(struct swaylock_state *state);
 
 extern char **environ;
 
@@ -820,6 +826,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_TEXT_VER_COLOR,
 		LO_TEXT_WRONG_COLOR,
 		LO_PLUGIN_GRACE,
+		LO_PLUGIN_PAUSE_WHEN_HIDDEN,
+		LO_PLUGIN_PAUSE_DELAY,
 		LO_PLUGIN_POINTER_HYSTERESIS,
 		LO_PLUGIN_COMMAND,
 		LO_PLUGIN_COMMAND_EACH,
@@ -881,6 +889,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"text-ver-color", required_argument, NULL, LO_TEXT_VER_COLOR},
 		{"text-wrong-color", required_argument, NULL, LO_TEXT_WRONG_COLOR},
 		{"grace", required_argument, NULL, LO_PLUGIN_GRACE},
+		{"pause-when-hidden", no_argument, NULL, LO_PLUGIN_PAUSE_WHEN_HIDDEN},
+		{"pause-when-hidden-delay", required_argument, NULL, LO_PLUGIN_PAUSE_DELAY},
 		{"pointer-hysteresis", required_argument, NULL, LO_PLUGIN_POINTER_HYSTERESIS},
 		{"command", required_argument, NULL, LO_PLUGIN_COMMAND},
 		{"command-each", required_argument, NULL, LO_PLUGIN_COMMAND_EACH},
@@ -1014,6 +1024,10 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"Indicates which program to run to draw backgrounds.\n"
 		"  --command-each <cmd>             "
 			"Like --command, but program is run once for each output\n"
+		"  --pause-when-hidden              "
+			"Stop the background program while its outputs are not drawn\n"
+		"  --pause-when-hidden-delay <ms>   "
+			"How long an output must go undrawn before pausing (default 5000)\n"
 		"\n"
 		"All <color> options are of the form <rrggbb[aa]>.\n";
 
@@ -1324,6 +1338,24 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 				} else {
 					swaylock_log(LOG_ERROR,
 						"Invalid value for pointer hysteresis: '%s' is not a real number", optarg);
+				}
+			}
+			break;
+		case LO_PLUGIN_PAUSE_WHEN_HIDDEN:
+			if (state) {
+				state->args.pause_when_hidden = true;
+			}
+			break;
+		case LO_PLUGIN_PAUSE_DELAY:
+			if (state) {
+				char *end = NULL;
+				long value = strtol(optarg, &end, 10);
+				if (end && *end == '\0' && value > 0 && value <= 3600000) {
+					state->args.hidden_timeout_ms = (int)value;
+				} else {
+					swaylock_log(LOG_ERROR,
+						"Invalid value for pause-when-hidden-delay: '%s' is not a duration in milliseconds",
+						optarg);
 				}
 			}
 			break;
@@ -1803,6 +1835,11 @@ static void setup_clientless_mode(struct swaylock_state *state) {
 		return;
 	}
 
+	/* The nested server (and with it every client record) is about to go
+	 * away, so a client stopped by --pause-when-hidden would never be woken
+	 * again. Resume first. */
+	resume_all_clients(state);
+
 	// Cancel any pending per-output redraw timers before tearing down the
 	// nested server. Otherwise, with multiple outputs (e.g. --command-each),
 	// a second output's redraw timer may fire after this teardown and call
@@ -1906,7 +1943,7 @@ static void grace_timeout(void *data) {
 uint32_t posix_spawn_setsid_flag(void);
 static bool spawn_command(struct swaylock_state *state, int sock_child,
 		int sock_local, const char *output_name, const char *output_desc,
-		const char *context) {
+		const char *context, pid_t *out_pid) {
 	posix_spawn_file_actions_t actions;
 	posix_spawnattr_t attribs;
 	char **prog_envp = NULL;
@@ -2007,6 +2044,9 @@ static bool spawn_command(struct swaylock_state *state, int sock_child,
 		goto end;
 	}
 	swaylock_log(LOG_DEBUG, "Forked background plugin (pid = %d; %s): %s", pid, context, state->args.plugin_command);
+	if (out_pid) {
+		*out_pid = pid;
+	}
 	ret = true;
 
 end:
@@ -2038,7 +2078,139 @@ static void client_resource_create(struct wl_listener *listener, void *data) {
 }
 
 /* Cleans up and frees the client, but does not start a new one */
+/* --- --pause-when-hidden ---------------------------------------------------
+ *
+ * swaylock-plugin forwards the plugin client's buffers straight through and
+ * has no notion of whether an output is actually on screen, so a client that
+ * renders on its own clock keeps working against a dark display. That is not
+ * merely wasted frames: an Xwayland-hosted xscreensaver hack burns CPU and GPU
+ * for as long as the screen stays off, which on battery-powered hardware is
+ * significant.
+ *
+ * The signal is already here. A compositor stops completing frame callbacks
+ * for an output it is not presenting, and forward.c proxies the plugin's
+ * callbacks onto swaylock's own surface, so an upstream callback left
+ * outstanding means "this output is dark". That needs no compositor-specific
+ * query and no polling of the display.
+ *
+ * The response is a SIGSTOP to the client's process group. The child is
+ * spawned with posix_spawn's setsid flag, so the group covers the whole tree
+ * (shell, wallpaper program, any Xwayland behind it) and never swaylock
+ * itself. SIGKILL would be wrong: client_destroyed() re-runs the command, so
+ * killing the client just respawns it.
+ *
+ * Stopping is safe against the "client failed to redraw -> clientless
+ * fallback" path, because that timer is armed only at output creation and on
+ * size-change configures, never periodically.
+ */
+
+static int64_t ms_since(const struct timespec *then) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (int64_t)(now.tv_sec - then->tv_sec) * 1000 +
+		(now.tv_nsec - then->tv_nsec) / 1000000;
+}
+
+static void set_client_paused(struct swaylock_bg_client *bg_client, bool paused) {
+	if (!bg_client || bg_client->pid <= 0 || bg_client->paused == paused) {
+		return;
+	}
+	/* Negative pid signals the process group. */
+	if (kill(-bg_client->pid, paused ? SIGSTOP : SIGCONT) != 0) {
+		swaylock_log(LOG_DEBUG, "Could not %s plugin process group %d: %s",
+			paused ? "stop" : "continue", bg_client->pid, strerror(errno));
+		return;
+	}
+	bg_client->paused = paused;
+	swaylock_log(LOG_DEBUG, "%s plugin process group %d",
+		paused ? "Stopped" : "Resumed", bg_client->pid);
+}
+
+/* Resume every stopped client on the way out: a SIGSTOPped process cannot act
+ * on SIGTERM, so leaving one frozen would strand the whole tree. */
+static void resume_all_clients(struct swaylock_state *state) {
+	struct swaylock_bg_client *bg_client;
+	wl_list_for_each(bg_client, &state->server.clients, link) {
+		set_client_paused(bg_client, false);
+	}
+}
+
+static struct swaylock_bg_client *client_for_surface(
+		struct swaylock_surface *surface) {
+	if (!surface) {
+		return NULL;
+	}
+	if (surface->client) {
+		return surface->client;
+	}
+	return surface->state ? surface->state->server.main_client : NULL;
+}
+
+void resume_client_for_surface(struct swaylock_surface *surface) {
+	struct swaylock_bg_client *bg_client = client_for_surface(surface);
+	if (bg_client && bg_client->paused) {
+		set_client_paused(bg_client, false);
+	}
+}
+
+/* A client is hidden when at least one of its outputs has been waiting on a
+ * frame callback past the threshold and none of its outputs is still being
+ * presented. The second half matters for a single --command client spanning
+ * several outputs: stopping it because one display slept would freeze the
+ * others. An idle client holds no outstanding callback at all, so it is never
+ * considered hidden -- which is correct, since it is costing nothing. */
+static bool client_is_hidden(struct swaylock_state *state,
+		struct swaylock_bg_client *bg_client) {
+	bool any_stale = false;
+	struct swaylock_surface *surface;
+	wl_list_for_each(surface, &state->surfaces, link) {
+		if (client_for_surface(surface) != bg_client) {
+			continue;
+		}
+		if (surface->frame_pending) {
+			if (ms_since(&surface->frame_pending_since) >=
+					state->args.hidden_timeout_ms) {
+				any_stale = true;
+			} else {
+				return false; // waiting, but not long enough to judge
+			}
+		} else if (surface->frame_last_done.tv_sec != 0 &&
+				ms_since(&surface->frame_last_done) <
+					state->args.hidden_timeout_ms) {
+			return false; // presented recently, so this client is visible
+		}
+	}
+	return any_stale;
+}
+
+static void hidden_check_timeout(void *data);
+
+static void arm_hidden_check(struct swaylock_state *state) {
+	if (!state->args.pause_when_hidden) {
+		return;
+	}
+	state->hidden_check_timer = loop_add_timer(state->eventloop,
+		HIDDEN_CHECK_INTERVAL, hidden_check_timeout, state);
+}
+
+static void hidden_check_timeout(void *data) {
+	struct swaylock_state *state = data;
+	// The event loop frees one-shot timers, so drop the reference first.
+	state->hidden_check_timer = NULL;
+
+	struct swaylock_bg_client *bg_client;
+	wl_list_for_each(bg_client, &state->server.clients, link) {
+		set_client_paused(bg_client, client_is_hidden(state, bg_client));
+	}
+
+	arm_hidden_check(state);
+}
+
 static void cleanup_client(struct swaylock_bg_client *bg_client) {
+	/* Unfreeze before dropping the record: once bg_client is gone nothing
+	 * knows the process group, and a stopped tree would linger forever. */
+	set_client_paused(bg_client, false);
+
 	wl_list_remove(&bg_client->link);
 
 	if (bg_client->client_connect_timer) {
@@ -2099,10 +2271,11 @@ static bool run_plugin_command(struct swaylock_state *state,
 		return false;
 	}
 
+	pid_t child_pid = -1;
 	if (!spawn_command(state, sockpair[0], sockpair[1],
 			output_surface ? output_surface->output_name : NULL,
 			output_surface ? output_surface->output_description : NULL,
-			context)) {
+			context, &child_pid)) {
 		close(sockpair[0]);
 		close(sockpair[1]);
 		printf("Failed to run command: %s\n", state->args.plugin_command);
@@ -2117,6 +2290,8 @@ static bool run_plugin_command(struct swaylock_state *state,
 	}
 	wl_list_insert(&state->server.clients, &bg_client->link);
 	bg_client->state = state;
+	bg_client->pid = child_pid;
+	bg_client->paused = false;
 	bg_client->serial = 100000;
 	bg_client->client = wl_client_create(state->server.display, sockpair[1]);
 
@@ -2305,6 +2480,8 @@ int main(int argc, char **argv) {
 		.plugin_command = NULL,
 		.grace_time = 0.0f,
 		.grace_pointer_hysteresis = 10.0f,
+		.pause_when_hidden = false,
+		.hidden_timeout_ms = HIDDEN_TIMEOUT_DEFAULT,
 	};
 	wl_list_init(&state.images);
 	set_default_colors(&state.args.colors);
@@ -2658,6 +2835,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	arm_hidden_check(&state);
+
 	while (state.run_display) {
 		errno = 0;
 		if (wl_display_flush(state.display) == -1 && errno != EAGAIN) {
@@ -2669,6 +2848,11 @@ int main(int argc, char **argv) {
 
 		loop_poll(state.eventloop);
 	}
+
+	/* Before tearing anything down: a SIGSTOPped process cannot act on the
+	 * SIGTERM that follows, so any paused client has to be woken first or
+	 * its process tree outlives the lock, still frozen. */
+	resume_all_clients(&state);
 
 	ext_session_lock_v1_unlock_and_destroy(state.ext_session_lock_v1);
 	wl_display_roundtrip(state.display);

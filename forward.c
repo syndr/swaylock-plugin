@@ -38,6 +38,9 @@ static const struct wp_color_representation_surface_v1_interface color_rep_surfa
 static void delete_image_desc_if_unreferenced(struct forward_image_desc* desc);
 static void apply_pending_surface_updates(struct forward_surface *surface,
 	struct augmented_surface *background, struct forward_state *state, bool synchronized);
+/* Implemented in main.c: un-pause the plugin client owning this output, if
+ * --pause-when-hidden stopped it. */
+void resume_client_for_surface(struct swaylock_surface *surface);
 
 struct forward_params {
 	struct zwp_linux_buffer_params_v1* params;
@@ -170,6 +173,17 @@ static void bg_frame_handle_done(void *data, struct wl_callback *callback,
 		uint32_t dummy) {
 	(void)dummy;
 	struct frame_callbacks *callbacks = data;
+
+	/* The compositor presented this output, so it is not hidden. Clearing
+	 * the stall record here is also what un-pauses a client stopped by
+	 * --pause-when-hidden: swaylock itself is never stopped, so it still
+	 * observes this even while the plugin process group is frozen. */
+	if (callbacks->sway_surface) {
+		struct swaylock_surface *surf = callbacks->sway_surface;
+		surf->frame_pending = false;
+		clock_gettime(CLOCK_MONOTONIC, &surf->frame_last_done);
+		resume_client_for_surface(surf);
+	}
 
 	// Trigger all frame callbacks for the background
 	struct wl_resource *plugin_cb, *tmp;
@@ -427,6 +441,15 @@ static void apply_pending_surface_updates(struct forward_surface *surface,
 		struct wl_callback *callback = wl_surface_frame(background->surface);
 		struct frame_callbacks *callbacks = calloc(1, sizeof(struct frame_callbacks));
 		assert(callbacks); // TODO handle error
+		/* Start (or continue) timing how long this output goes unpresented.
+		 * Only the first outstanding callback starts the clock, so a client
+		 * committing every frame does not keep resetting it. */
+		callbacks->sway_surface = surface->sway_surface;
+		if (surface->sway_surface && !surface->sway_surface->frame_pending) {
+			surface->sway_surface->frame_pending = true;
+			clock_gettime(CLOCK_MONOTONIC,
+				&surface->sway_surface->frame_pending_since);
+		}
 		callbacks->list = surface->frame_callbacks;
 		callbacks->list.next->prev = &callbacks->list;
 		callbacks->list.prev->next = &callbacks->list;

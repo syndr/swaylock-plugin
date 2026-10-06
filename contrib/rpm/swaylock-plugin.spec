@@ -1,4 +1,4 @@
-%{!?pkg_version:%global pkg_version 1.8.7.2}
+%{!?pkg_version:%global pkg_version 1.8.7.3}
 
 Name:           swaylock-plugin
 Version:        %{pkg_version}
@@ -86,6 +86,10 @@ install -Dpm0755 contrib/screensaver/swaylock-screensaver-shots \
 %{_bindir}/swaylock-screensaver-shots
 
 %changelog
+* Wed Sep 02 2026 syndr <syndr@ultroncore.net> - 1.8.7.3-1
+- Add --pause-when-hidden: stop the background program while its outputs
+  are not being drawn
+
 * Sat Aug 29 2026 syndr <syndr@ultroncore.net> - 1.8.7.2-1
 - Build arm64 .debs alongside amd64 in deb.yml (no RPM-side change)
 
