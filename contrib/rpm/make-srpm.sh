@@ -47,6 +47,25 @@ build_srpm() { # <spec> [extra --define args...]
         "${s}"
 }
 
+# Both specs pin their version to a hardcoded fallback
+# (%{!?pkg_version:%global pkg_version X}) and the resolved version is passed
+# here as a -D define. That sets the SRPM's NVR, but the spec file *inside*
+# the SRPM keeps the fallback. COPR imports that spec into dist-git and the
+# chroots build from it, so once upstream ships a newer release the chroots
+# look for the stale fallback's tarball while SOURCES carries the newer one
+# ("Bad file: ... No such file or directory"). Bake the resolved version into
+# the spec fed to rpmbuild so the SRPM is self-consistent.
+bake_version() { # <spec> <version> -> path to baked copy in ${work}
+    local s="$1" v="$2" out
+    out="${work}/$(basename "${1}")"
+    sed -E "s/%\{!\?pkg_version:[^}]*\}/%global pkg_version ${v}/" "${s}" > "${out}"
+    grep -qF -- "%global pkg_version ${v}" "${out}" || {
+        echo "make-srpm.sh: could not bake version ${v} into $(basename "${s}") (missing %{!?pkg_version:...} line?)" >&2
+        exit 1
+    }
+    echo "${out}"
+}
+
 case "$(basename "${spec}")" in
 swaylock-plugin.spec)
     version="$(sed -nE "s/[[:space:]]*version: '([^']+)'.*/\1/p" meson.build | head -n1)"
@@ -73,7 +92,8 @@ swaylock-plugin.spec)
         --prefix="swaylock-plugin-${version}/" \
         --output="${work}/SOURCES/swaylock-plugin-${version}.tar.gz" \
         HEAD
-    build_srpm "${spec}" --define "pkg_version ${version}" "${release_def[@]}"
+    baked="$(bake_version "${spec}" "${version}")" || exit 1
+    build_srpm "${baked}" "${release_def[@]}"
     ;;
 
 windowtolayer.spec)
@@ -88,7 +108,8 @@ windowtolayer.spec)
     curl -sfL \
         --output "${work}/SOURCES/windowtolayer-v${version}.tar.gz" \
         "https://gitlab.freedesktop.org/mstoeckl/windowtolayer/-/archive/v${version}/windowtolayer-v${version}.tar.gz"
-    build_srpm "${spec}" --define "pkg_version ${version}"
+    baked="$(bake_version "${spec}" "${version}")" || exit 1
+    build_srpm "${baked}"
     ;;
 
 *)

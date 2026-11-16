@@ -34,12 +34,15 @@ src="${workdir}/windowtolayer-v${version}"
 [ -d "${src}" ] || { echo "expected ${src} in upstream tarball" >&2; exit 1; }
 
 cp -a "${here}/debian" "${src}/debian"
+[ -f "${src}/debian/changelog" ] || { echo "expected ${src}/debian/changelog" >&2; exit 1; }
 
 current="$(dpkg-parsechangelog -l "${src}/debian/changelog" -S Version | sed -E 's/-[0-9]+$//')"
 if [ "${version}" != "${current}" ]; then
+    # dch emits libdistro-info notices on stdout; keep the stdout-only path
+    # contract (the final echo below) clean.
     DEBEMAIL='syndr@ultroncore.net' DEBFULLNAME='syndr' \
         dch -c "${src}/debian/changelog" --newversion "${version}-1" --distribution unstable \
-            "Track-latest build for upstream v${version} (entry generated at build time)."
+            "Track-latest build for upstream v${version} (entry generated at build time)." 1>&2
 fi
 
 echo "${src}"
