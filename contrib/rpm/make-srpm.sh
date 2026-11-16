@@ -56,7 +56,8 @@ build_srpm() { # <spec> [extra --define args...]
 # ("Bad file: ... No such file or directory"). Bake the resolved version into
 # the spec fed to rpmbuild so the SRPM is self-consistent.
 bake_version() { # <spec> <version> -> path to baked copy in ${work}
-    local s="$1" v="$2" out="${work}/$(basename "${1}")"
+    local s="$1" v="$2" out
+    out="${work}/$(basename "${1}")"
     sed -E "s/%\{!\?pkg_version:[^}]*\}/%global pkg_version ${v}/" "${s}" > "${out}"
     grep -qF -- "%global pkg_version ${v}" "${out}" || {
         echo "make-srpm.sh: could not bake version ${v} into $(basename "${s}") (missing %{!?pkg_version:...} line?)" >&2
